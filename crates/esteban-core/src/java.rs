@@ -4,7 +4,6 @@ use std::path::{Component, Path, PathBuf};
 use serde::Deserialize;
 
 use crate::download::{self, Download, Stats};
-use crate::error::IoContext;
 use crate::fsx;
 use crate::hash::Hash;
 use crate::net::Net;
@@ -163,6 +162,8 @@ fn contained(base: &Path, relative: &str) -> Result<PathBuf> {
 
 #[cfg(unix)]
 async fn make_link(path: &Path, target: &Path) -> Result<()> {
+    use crate::error::IoContext;
+
     if let Ok(existing) = tokio::fs::read_link(path).await {
         if existing == target {
             return Ok(());
