@@ -12,6 +12,7 @@ pub mod modcheck;
 pub mod modrinth;
 pub mod mojang;
 pub mod net;
+pub mod packs;
 pub mod paths;
 pub mod profile;
 pub mod progress;
