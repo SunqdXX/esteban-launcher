@@ -17,6 +17,8 @@ use crate::{Error, Result, fsx};
 
 pub const HACKS_WARNING: &str = "Most servers ban this. You are responsible for where you use it.";
 
+pub const NEW_INSTANCE_OPTIONS: &[(&str, &str)] = &[("guiScale", "2")];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProfileKind {
@@ -94,6 +96,31 @@ impl Instance {
 
     pub fn crash_reports_dir(&self) -> PathBuf {
         self.dir.join("crash-reports")
+    }
+
+    pub fn options_path(&self) -> PathBuf {
+        self.dir.join("options.txt")
+    }
+
+    pub async fn has_options(&self) -> Result<bool> {
+        let path = self.options_path();
+        match tokio::fs::symlink_metadata(&path).await {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e).at(&path),
+        }
+    }
+
+    pub async fn seed_options(&self, data_version: u32, entries: &[(&str, &str)]) -> Result<bool> {
+        if self.has_options().await? {
+            return Ok(false);
+        }
+        let mut text = format!("version:{data_version}\n");
+        for (key, value) in entries {
+            text.push_str(&format!("{key}:{value}\n"));
+        }
+        fsx::write_atomic(&self.options_path(), text.as_bytes()).await?;
+        Ok(true)
     }
 
     pub fn lock_path(&self) -> PathBuf {
@@ -432,5 +459,35 @@ mod tests {
         let (_dir, instance) = clean_instance().await;
         std::fs::write(instance.lock_path(), b"{broken").unwrap();
         assert!(instance.read_lock().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_new_instance_gets_the_data_version_and_gui_scale() {
+        let (_dir, instance) = clean_instance().await;
+        let extra = [("onboardAccessibility", "false")];
+        let entries: Vec<(&str, &str)> =
+            NEW_INSTANCE_OPTIONS.iter().copied().chain(extra).collect();
+        assert!(instance.seed_options(4189, &entries).await.unwrap());
+        assert_eq!(
+            std::fs::read_to_string(instance.options_path()).unwrap(),
+            "version:4189\nguiScale:2\nonboardAccessibility:false\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn existing_options_are_never_touched() {
+        let (_dir, instance) = clean_instance().await;
+        let mine = "version:4189\nguiScale:3\nfov:0.5\n";
+        std::fs::write(instance.options_path(), mine).unwrap();
+        assert!(
+            !instance
+                .seed_options(4189, NEW_INSTANCE_OPTIONS)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            std::fs::read_to_string(instance.options_path()).unwrap(),
+            mine
+        );
     }
 }

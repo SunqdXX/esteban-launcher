@@ -23,8 +23,9 @@ Profiles:
 
 1. Version manifest, then the version JSON, checked against the sha1 the manifest lists.
 2. Client jar, libraries (Fabric's win when both list the same artifact), assets, and the Java runtime named by `javaVersion.component`.
-3. Mods from Modrinth (releases only, sha512 checked), plus the hacks jar for hacks profiles only. Picks are written to `mods.lock.json` so a re-run is reproducible. `--update` or a changed mod toggle resolves again. See [Mods](#mods).
-4. The clean-profile guard. It opens every jar in `mods/`, including jars nested inside jars, and refuses if the hacks mod is anywhere.
+3. A brand-new instance (no `options.txt` yet) gets `guiScale:2`, written after a `version:` line with the data version read from the client jar's `version.json`. Without that line the game treats the file as very old and runs every options upgrade on it, and one of those turns off Mojang's accessibility screen for new players. An existing `options.txt` is never touched.
+4. Mods from Modrinth (releases only, sha512 checked), plus the hacks jar for hacks profiles only. Picks are written to `mods.lock.json` so a re-run is reproducible. `--update` or a changed mod toggle resolves again. See [Mods](#mods).
+5. The clean-profile guard. It opens every jar in `mods/`, including jars nested inside jars, and refuses if the hacks mod is anywhere.
 
 Every download goes to a `.part` file, is checked against its hash and size, and is only then renamed into place. Existing files are re-hashed on each run, so a corrupted file is caught and fetched again.
 
@@ -77,4 +78,4 @@ Files already on disk are re-hashed on every install and launch, and a mismatch 
 
 Launching needs a signed-in Microsoft account (M2). There is no offline mode and no way to build one in.
 
-`--smoke-test` waits until the title screen has loaded, keeps the game up for a few seconds, then stops it and exits 0. It fails if the game crashes or takes too long. For an instance with no `options.txt`, it turns off Mojang's one-time accessibility prompt so the title screen is reached. Normal launches never touch that setting.
+`--smoke-test` waits until the title screen has loaded, keeps the game up for a few seconds, then stops it and exits 0. It fails if the game crashes or takes too long. For a brand-new instance it also writes `onboardAccessibility:false` into the first `options.txt`, so the title screen is reached. Normal launches never touch that setting.

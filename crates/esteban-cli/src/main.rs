@@ -168,7 +168,7 @@ async fn run(cli: Cli) -> Result<(), Failure> {
     let net = Net::launcher()?;
     match cli.command {
         Command::Install(target) => {
-            let installed = prepare(&net, &paths, &target).await?;
+            let installed = prepare(&net, &paths, &target, &[]).await?;
             summarize(&installed);
             Ok(())
         }
@@ -247,12 +247,19 @@ async fn toggle_mod(
         target.profile,
         target.game_version
     );
-    let installed = prepare(net, paths, target).await?;
+    let installed = prepare(net, paths, target, &[]).await?;
     summarize(&installed);
     Ok(())
 }
 
-async fn prepare(net: &Net, paths: &Paths, target: &Target) -> Result<Installed, Failure> {
+const SMOKE_OPTIONS: &[(&str, &str)] = &[("onboardAccessibility", "false")];
+
+async fn prepare(
+    net: &Net,
+    paths: &Paths,
+    target: &Target,
+    first_run_options: &'static [(&'static str, &'static str)],
+) -> Result<Installed, Failure> {
     if target.profile == ProfileKind::Hacks {
         let mut settings = Settings::load(paths).await?;
         if !settings.hacks_warning_accepted {
@@ -276,6 +283,7 @@ async fn prepare(net: &Net, paths: &Paths, target: &Target) -> Result<Installed,
         &target.game_version,
         InstallOptions {
             update: target.update,
+            first_run_options,
         },
         &progress,
     )
@@ -347,7 +355,12 @@ async fn launch(net: &Net, paths: &Paths, args: LaunchArgs, dry_run: bool) -> Re
     } else {
         session()?
     };
-    let installed = prepare(net, paths, &args.target).await?;
+    let first_run = if args.smoke_test.is_some() {
+        SMOKE_OPTIONS
+    } else {
+        &[]
+    };
+    let installed = prepare(net, paths, &args.target, first_run).await?;
     summarize(&installed);
     let quick_play = match (&args.server, &args.world) {
         (Some(server), _) => Some(QuickPlay::Multiplayer(server.clone())),
@@ -365,9 +378,6 @@ async fn launch(net: &Net, paths: &Paths, args: LaunchArgs, dry_run: bool) -> Re
         return Ok(());
     }
 
-    if args.smoke_test.is_some() {
-        seed_smoke_options(&installed.instance.dir).await?;
-    }
     let smoke = args.smoke_test.map(|seconds| Smoke {
         markers: vec!["Sound engine started".to_string()],
         timeout: Duration::from_secs(seconds),
@@ -396,19 +406,4 @@ async fn launch(net: &Net, paths: &Paths, args: LaunchArgs, dry_run: bool) -> Re
         return Err(Failure::GameCrashed);
     }
     Ok(())
-}
-
-async fn seed_smoke_options(instance_dir: &std::path::Path) -> Result<(), Failure> {
-    let options = instance_dir.join("options.txt");
-    if tokio::fs::try_exists(&options).await.unwrap_or(true) {
-        return Ok(());
-    }
-    tokio::fs::write(&options, "onboardAccessibility:false\n")
-        .await
-        .map_err(|source| {
-            Failure::Error(Error::Io {
-                path: options,
-                source,
-            })
-        })
 }

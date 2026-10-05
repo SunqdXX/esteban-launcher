@@ -1,5 +1,8 @@
 use std::collections::{BTreeSet, HashSet};
-use std::path::PathBuf;
+use std::io::{Cursor, Read};
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
 
 use crate::download::{self, Download, Stats};
 use crate::error::IoContext;
@@ -17,7 +20,7 @@ use crate::mojang::version::VersionJson;
 use crate::mojang::{assets, libraries};
 use crate::net::Net;
 use crate::paths::Paths;
-use crate::profile::{HACKS_WARNING, Instance, ProfileKind, Settings};
+use crate::profile::{HACKS_WARNING, Instance, NEW_INSTANCE_OPTIONS, ProfileKind, Settings};
 use crate::progress::Progress;
 use crate::system::{self, Platform};
 use crate::{Error, Result, fsx};
@@ -25,6 +28,7 @@ use crate::{Error, Result, fsx};
 #[derive(Clone, Copy, Debug, Default)]
 pub struct InstallOptions {
     pub update: bool,
+    pub first_run_options: &'static [(&'static str, &'static str)],
 }
 
 #[derive(Clone, Debug)]
@@ -101,6 +105,26 @@ pub async fn install(
         )
         .await?,
     );
+
+    if !instance.has_options().await? {
+        match data_version(&client_jar).await? {
+            Some(data_version) => {
+                let entries: Vec<(&str, &str)> = NEW_INSTANCE_OPTIONS
+                    .iter()
+                    .chain(options.first_run_options)
+                    .copied()
+                    .collect();
+                if instance.seed_options(data_version, &entries).await? {
+                    progress.notice(
+                        "New instance: GUI scale starts at 2. Change it in game under Options, Video Settings.",
+                    );
+                }
+            }
+            None => {
+                tracing::warn!(jar = %client_jar.display(), "the client jar has no data version, leaving options.txt to the game");
+            }
+        }
+    }
 
     let mut meta = instance.read_meta().await?;
     let loader_version = match (&meta.loader_version, options.update) {
@@ -294,6 +318,27 @@ pub async fn install(
     })
 }
 
+#[derive(Deserialize)]
+struct JarVersion {
+    world_version: u32,
+}
+
+async fn data_version(client_jar: &Path) -> Result<Option<u32>> {
+    let bytes = tokio::fs::read(client_jar).await.at(client_jar)?;
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|source| Error::Zip {
+        path: client_jar.to_path_buf(),
+        source,
+    })?;
+    let Ok(mut entry) = archive.by_name("version.json") else {
+        return Ok(None);
+    };
+    let mut text = Vec::new();
+    entry.read_to_end(&mut text).at(client_jar)?;
+    Ok(serde_json::from_slice::<JarVersion>(&text)
+        .ok()
+        .map(|v| v.world_version))
+}
+
 type Mods = (Vec<ResolvedMod>, Vec<Unavailable>);
 
 fn from_lock(lock: &ModLock) -> Mods {
@@ -405,6 +450,37 @@ mod tests {
             settle(broken, None, &crate::progress::Silent),
             Err(Error::Unsupported(_))
         ));
+    }
+
+    fn jar_with(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut out = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut out);
+            for (name, data) in entries {
+                writer
+                    .start_file(*name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                writer.write_all(data).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        out.into_inner()
+    }
+
+    #[tokio::test]
+    async fn the_data_version_comes_from_the_client_jar() {
+        let dir = tempfile::tempdir().unwrap();
+        let jar = dir.path().join("1.21.4.jar");
+        std::fs::write(
+            &jar,
+            jar_with(&[("version.json", br#"{"id":"1.21.4","world_version":4189}"#)]),
+        )
+        .unwrap();
+        assert_eq!(data_version(&jar).await.unwrap(), Some(4189));
+        let bare = dir.path().join("bare.jar");
+        std::fs::write(&bare, jar_with(&[("a.class", b"x")])).unwrap();
+        assert_eq!(data_version(&bare).await.unwrap(), None);
     }
 
     #[tokio::test]
