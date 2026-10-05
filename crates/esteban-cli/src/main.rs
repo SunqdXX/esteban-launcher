@@ -10,6 +10,7 @@ use esteban_core::install::{InstallOptions, Installed, install};
 use esteban_core::launch::{self, LaunchOptions, QuickPlay, Smoke};
 use esteban_core::modrinth::DEFAULT_MODS;
 use esteban_core::net::Net;
+use esteban_core::packs::{self, Imported, Linked};
 use esteban_core::paths::Paths;
 use esteban_core::profile::{HACKS_WARNING, Instance, ProfileKind, Settings};
 use esteban_core::{DISCLAIMER, Error};
@@ -42,6 +43,35 @@ enum Command {
     Plan(LaunchArgs),
     #[command(subcommand, about = "See or change which mods a profile uses")]
     Mods(ModsCommand),
+    #[command(
+        subcommand,
+        about = "Use shader packs, resource packs and screenshots from another game folder"
+    )]
+    Packs(PacksCommand),
+    #[command(about = "Print the folder of a profile")]
+    Path(Selector),
+}
+
+#[derive(Subcommand)]
+enum PacksCommand {
+    #[command(
+        about = "Point the instance's pack folders at another game folder, nothing gets copied"
+    )]
+    Link(PackSource),
+    #[command(about = "Copy packs and screenshots in, never overwriting a file")]
+    Import(PackSource),
+}
+
+#[derive(Args, Clone)]
+struct PackSource {
+    #[command(flatten)]
+    selector: Selector,
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Game folder that holds shaderpacks, resourcepacks and screenshots, for example ~/.minecraft"
+    )]
+    from: PathBuf,
 }
 
 #[derive(Subcommand)]
@@ -179,7 +209,82 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         Command::Mods(ModsCommand::Disable(toggle)) => {
             toggle_mod(&net, &paths, &toggle, false).await
         }
+        Command::Packs(PacksCommand::Link(source)) => link_packs(&paths, &source).await,
+        Command::Packs(PacksCommand::Import(source)) => import_packs(&paths, &source).await,
+        Command::Path(selector) => {
+            let instance = Instance::new(&paths, selector.profile, &selector.game_version)?;
+            println!("{}", instance.dir.display());
+            if !instance.dir.exists() {
+                eprintln!("not installed yet");
+            }
+            Ok(())
+        }
     }
+}
+
+async fn link_packs(paths: &Paths, source: &PackSource) -> Result<(), Failure> {
+    let instance = Instance::new(
+        paths,
+        source.selector.profile,
+        &source.selector.game_version,
+    )?;
+    let mut refused = false;
+    for (name, outcome) in packs::link(&instance, &source.from).await? {
+        match outcome {
+            Linked::Linked(to) => println!("{name}: linked to {}", to.display()),
+            Linked::AlreadyLinked(to) => println!("{name}: already linked to {}", to.display()),
+            Linked::Relinked { from, to } => println!(
+                "{name}: linked to {} (was {}, that folder is untouched)",
+                to.display(),
+                from.display()
+            ),
+            Linked::NotInSource => println!("{name}: not in {}, skipped", source.from.display()),
+            Linked::HasFiles => {
+                refused = true;
+                println!(
+                    "{name}: already has files here, so it was left alone. Use packs import to copy instead."
+                );
+            }
+        }
+    }
+    println!("Folder: {}", instance.dir.display());
+    if refused {
+        return Err(Failure::Error(Error::Unsupported(
+            "some folders were left alone".into(),
+        )));
+    }
+    Ok(())
+}
+
+async fn import_packs(paths: &Paths, source: &PackSource) -> Result<(), Failure> {
+    let instance = Instance::new(
+        paths,
+        source.selector.profile,
+        &source.selector.game_version,
+    )?;
+    for (name, outcome) in packs::import(&instance, &source.from).await? {
+        match outcome {
+            Imported::Copied {
+                copied,
+                kept,
+                skipped_links,
+            } => {
+                let links = if skipped_links > 0 {
+                    format!(", skipped {skipped_links} links")
+                } else {
+                    String::new()
+                };
+                println!("{name}: copied {copied}, kept {kept} that were already there{links}");
+            }
+            Imported::IsLinked(to) => println!(
+                "{name}: linked to {}, so there is nothing to copy",
+                to.display()
+            ),
+            Imported::NotInSource => println!("{name}: not in {}, skipped", source.from.display()),
+        }
+    }
+    println!("Folder: {}", instance.dir.display());
+    Ok(())
 }
 
 async fn list_mods(paths: &Paths, selector: &Selector) -> Result<(), Failure> {

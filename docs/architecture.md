@@ -56,6 +56,19 @@ Every skipped mod gets one plain sentence, printed during install and stored in 
 
 Jars the launcher did not put in `mods/` are left alone and listed as "added by you, not checked".
 
+## Pack folders
+
+`esteban-cli packs link --from <game folder>` points an instance's `shaderpacks/`, `resourcepacks/` and `screenshots/` at the same folders in another game folder, for example `~/.minecraft` from Lunar or the vanilla launcher. Nothing is copied. It is a symlink on Linux and a directory junction on Windows, so it needs no admin rights.
+
+- `mods/` is never linked, so another launcher's mods can never reach the clean profile.
+- A missing folder or an empty one in the instance is replaced by the link. A folder with files in it is left alone, and the command says to use import instead.
+- An existing link is moved to the new source. Only the link changes, never the folder it pointed at.
+- A source inside the instance itself is refused.
+
+`packs import` copies the same folders in instead. It never overwrites a file, never writes through a link (a linked folder is reported and skipped), and skips symlinks inside the source. Each file is copied to a `.part` file first and only put in place if nothing with that name exists yet.
+
+`esteban-cli path` prints an instance's folder.
+
 ## What gets checked
 
 Every file download carries a hash. The `Download` type has no way to leave it out, and a mismatch is retried and then refused.

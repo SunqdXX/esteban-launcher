@@ -15,6 +15,7 @@
 - [ ] Java runtime files are fetched raw. LZMA would save about 30 MB on a first install.
 - [ ] When a mod's jar rules out the newest build of its dependency, the mod is skipped. Picking an older build of the dependency that fits is not tried.
 - [ ] A changed mod toggle resolves every mod again, so other mods can move to newer releases at the same time.
+- [ ] Pack folder links on Windows are directory junctions. They build in CI but haven't been tried on a real Windows install yet.
 
 ## Needs the owner
 
