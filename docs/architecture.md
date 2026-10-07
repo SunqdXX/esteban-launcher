@@ -23,7 +23,7 @@ Profiles:
 
 1. Version manifest, then the version JSON, checked against the sha1 the manifest lists.
 2. Client jar, libraries (Fabric's win when both list the same artifact), assets, and the Java runtime named by `javaVersion.component`.
-3. A brand-new instance (no `options.txt` yet) gets `guiScale:2`, written after a `version:` line with the data version read from the client jar's `version.json`. Without that line the game treats the file as very old and runs every options upgrade on it, and one of those turns off Mojang's accessibility screen for new players. An existing `options.txt` is never touched.
+3. A brand-new instance (no `options.txt` yet) gets `guiScale:3`, written after a `version:` line with the data version read from the client jar's `version.json`. Without that line the game treats the file as very old and runs every options upgrade on it, and one of those turns off Mojang's accessibility screen for new players. An existing `options.txt` is never touched.
 4. Mods from Modrinth (releases only, sha512 checked), plus the hacks jar for hacks profiles only. Picks are written to `mods.lock.json` so a re-run is reproducible. `--update` or a changed mod toggle resolves again. See [Mods](#mods).
 5. The clean-profile guard. It opens every jar in `mods/`, including jars nested inside jars, and refuses if the hacks mod is anywhere.
 

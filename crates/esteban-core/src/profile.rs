@@ -17,7 +17,7 @@ use crate::{Error, Result, fsx};
 
 pub const HACKS_WARNING: &str = "Most servers ban this. You are responsible for where you use it.";
 
-pub const NEW_INSTANCE_OPTIONS: &[(&str, &str)] = &[("guiScale", "2")];
+pub const NEW_INSTANCE_OPTIONS: &[(&str, &str)] = &[("guiScale", "3")];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -470,14 +470,14 @@ mod tests {
         assert!(instance.seed_options(4189, &entries).await.unwrap());
         assert_eq!(
             std::fs::read_to_string(instance.options_path()).unwrap(),
-            "version:4189\nguiScale:2\nonboardAccessibility:false\n"
+            "version:4189\nguiScale:3\nonboardAccessibility:false\n"
         );
     }
 
     #[tokio::test]
     async fn existing_options_are_never_touched() {
         let (_dir, instance) = clean_instance().await;
-        let mine = "version:4189\nguiScale:3\nfov:0.5\n";
+        let mine = "version:4189\nguiScale:4\nfov:0.5\n";
         std::fs::write(instance.options_path(), mine).unwrap();
         assert!(
             !instance

@@ -116,7 +116,7 @@ pub async fn install(
                     .collect();
                 if instance.seed_options(data_version, &entries).await? {
                     progress.notice(
-                        "New instance: GUI scale starts at 2. Change it in game under Options, Video Settings.",
+                        "New instance: GUI scale starts at 3. Change it in game under Options, Video Settings.",
                     );
                 }
             }
