@@ -1,13 +1,22 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "Main window. Titlebar controls only.",
+  "description": "Main window. Titlebar controls, the launcher's own commands and its progress events.",
   "windows": ["main"],
   "permissions": [
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-internal-toggle-maximize",
     "core:window:allow-start-dragging",
-    "core:window:allow-close"
+    "core:window:allow-close",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-overview",
+    "allow-select",
+    "allow-accept-hacks-warning",
+    "allow-instance-status",
+    "allow-set-mod",
+    "allow-install",
+    "allow-open-folder"
   ]
 }
