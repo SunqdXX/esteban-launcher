@@ -25,7 +25,6 @@
 - [ ] App icon: right now it is the full logo on a square canvas of its own background color. Decide on a square cut of the logo for small icon sizes.
 - [x] BTC and XMR addresses and the Discord invite are in `config/donate.json`.
 - [ ] USDC address and its network. Until then About shows "Address not set yet" for USDC.
-- [ ] The Discord invite expires on 2026-11-03. Swap in one set to never expire before any release.
 - [ ] Signing keys for `versions.json` and the updater, kept offline (M5, M7).
 
 ## Later
