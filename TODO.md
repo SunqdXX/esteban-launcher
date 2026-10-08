@@ -20,7 +20,6 @@
 ## Needs the owner
 
 - [ ] Mojang approval of the registered client ID. Blocks M2.
-- [ ] Create the GitHub repo `SunqdXX/esteban-launcher` so CI runs.
 - [ ] App icon: right now it is the full logo on a square canvas of its own background color. Decide on a square cut of the logo for small icon sizes.
 - [ ] `config/donate.json` with public BTC, XMR and USDC addresses (M4).
 - [ ] Signing keys for `versions.json` and the updater, kept offline (M5, M7).
