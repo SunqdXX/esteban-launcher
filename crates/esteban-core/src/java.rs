@@ -181,6 +181,31 @@ async fn make_link(_path: &Path, _target: &Path) -> Result<()> {
     Ok(())
 }
 
+pub async fn probe(path: &std::path::Path) -> Result<String> {
+    let run = tokio::process::Command::new(path)
+        .arg("-version")
+        .kill_on_drop(true)
+        .output();
+    let output = tokio::time::timeout(std::time::Duration::from_secs(10), run)
+        .await
+        .map_err(|_| {
+            Error::Settings(format!(
+                "{} didn't answer within 10 seconds.",
+                path.display()
+            ))
+        })?
+        .map_err(|e| Error::Settings(format!("Could not run {}: {e}", path.display())))?;
+    let text = String::from_utf8_lossy(&output.stderr);
+    let first = text.lines().next().unwrap_or_default().trim().to_string();
+    if !output.status.success() || !first.contains("version") {
+        return Err(Error::Settings(format!(
+            "{} doesn't look like Java. Pick the java file inside a JDK or JRE's bin folder.",
+            path.display()
+        )));
+    }
+    Ok(first)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,68 +242,42 @@ mod tests {
             Some(RuntimeFile::Link { .. })
         ));
     }
-}
 
-pub async fn probe(path: &std::path::Path) -> Result<String> {
-    let run = tokio::process::Command::new(path)
-        .arg("-version")
-        .kill_on_drop(true)
-        .output();
-    let output = tokio::time::timeout(std::time::Duration::from_secs(10), run)
-        .await
-        .map_err(|_| {
-            Error::Settings(format!(
-                "{} didn't answer within 10 seconds.",
-                path.display()
-            ))
-        })?
-        .map_err(|e| Error::Settings(format!("Could not run {}: {e}", path.display())))?;
-    let text = String::from_utf8_lossy(&output.stderr);
-    let first = text.lines().next().unwrap_or_default().trim().to_string();
-    if !output.status.success() || !first.contains("version") {
-        return Err(Error::Settings(format!(
-            "{} doesn't look like Java. Pick the java file inside a JDK or JRE's bin folder.",
-            path.display()
-        )));
-    }
-    Ok(first)
-}
+    #[cfg(unix)]
+    mod probe {
+        use super::super::*;
+        use std::os::unix::fs::PermissionsExt;
 
-#[cfg(test)]
-#[cfg(unix)]
-mod probe_tests {
-    use super::*;
-    use std::os::unix::fs::PermissionsExt;
+        fn script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
+            let path = dir.join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
 
-    fn script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
-        let path = dir.join(name);
-        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        path
-    }
+        #[tokio::test]
+        async fn a_java_answers_with_its_version_line() {
+            let dir = tempfile::tempdir().unwrap();
+            let java = script(
+                dir.path(),
+                "java",
+                "echo 'openjdk version \"21.0.7\" 2025-04-15' >&2",
+            );
+            assert_eq!(
+                probe(&java).await.unwrap(),
+                "openjdk version \"21.0.7\" 2025-04-15"
+            );
+        }
 
-    #[tokio::test]
-    async fn a_java_answers_with_its_version_line() {
-        let dir = tempfile::tempdir().unwrap();
-        let java = script(
-            dir.path(),
-            "java",
-            "echo 'openjdk version \"21.0.7\" 2025-04-15' >&2",
-        );
-        assert_eq!(
-            probe(&java).await.unwrap(),
-            "openjdk version \"21.0.7\" 2025-04-15"
-        );
-    }
-
-    #[tokio::test]
-    async fn other_programs_and_missing_files_are_refused() {
-        let dir = tempfile::tempdir().unwrap();
-        let other = script(dir.path(), "other", "echo hello");
-        assert!(matches!(probe(&other).await, Err(Error::Settings(_))));
-        assert!(matches!(
-            probe(&dir.path().join("missing")).await,
-            Err(Error::Settings(_))
-        ));
+        #[tokio::test]
+        async fn other_programs_and_missing_files_are_refused() {
+            let dir = tempfile::tempdir().unwrap();
+            let other = script(dir.path(), "other", "echo hello");
+            assert!(matches!(probe(&other).await, Err(Error::Settings(_))));
+            assert!(matches!(
+                probe(&dir.path().join("missing")).await,
+                Err(Error::Settings(_))
+            ));
+        }
     }
 }
