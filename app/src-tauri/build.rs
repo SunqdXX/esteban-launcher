@@ -7,6 +7,17 @@ fn main() {
         "set_mod",
         "install",
         "open_folder",
+        "launcher_settings",
+        "set_memory",
+        "set_jvm_args",
+        "check_java",
+        "set_java",
+        "pick_folder",
+        "pick_java",
+        "set_data_dir",
+        "packs",
+        "about",
+        "open_link",
     ]);
     if let Err(error) =
         tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))

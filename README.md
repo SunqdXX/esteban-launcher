@@ -19,7 +19,8 @@ sign in isnt built yet tho, it waits on mojang approving the app
 - launching needs the microsoft login above, so for now its only tested locally
 - 1.21.4 installs and starts. 26.x installs too, full testing for it comes later
 - mods come from modrinth at install time, nothing gets bundled. if a mod has no build for ur version or wouldnt start next to the others, its skipped and u get told why
-- the app window has the Play, Profiles and Mods screens: pick a version and Normal or Hacked, hit Play and it installs and checks everything with a live progress bar, turn mods on or off, open an instance folder. Servers, Settings and About come next
+- the app window has every screen except Servers: Play (pick a version and Normal or Hacked, hit Play and it installs and checks everything with a live progress bar), Profiles, Mods (turn mods on or off), Settings (memory, java, extra jvm flags, where games live, packs from another launcher) and About
+- both modes get the esteban hud from the [esteban v1.4.0 release](https://github.com/SunqdXX/esteban/releases/tag/v1.4.0), Hacked also gets the hacks mod. both are hash checked
 - Play stops after the install for now and tells u why: starting the game needs the microsoft sign in
 - tested on linux. windows builds in ci but hasnt been run in game yet
 
@@ -32,7 +33,6 @@ sign in isnt built yet tho, it waits on mojang approving the app
 
 - signed updates: the update list gets signed and every jar is checked against it before anything installs
 - voluntary crypto donations, never needed for anything
-- a clean hud mod for the default profile
 
 ## build
 

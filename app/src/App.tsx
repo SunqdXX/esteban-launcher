@@ -3,9 +3,11 @@ import styles from "./App.module.css";
 import Placeholder from "./components/Placeholder";
 import Sidebar from "./components/Sidebar";
 import Titlebar from "./components/Titlebar";
+import AboutPage from "./pages/AboutPage";
 import ModsPage from "./pages/ModsPage";
 import PlayPage from "./pages/PlayPage";
 import ProfilesPage from "./pages/ProfilesPage";
+import SettingsPage from "./pages/SettingsPage";
 import { PAGE_LABELS, type PageId } from "./pages";
 import { useLauncher } from "./useLauncher";
 
@@ -34,8 +36,12 @@ export default function App() {
     );
   } else if (page === "mods") {
     content = <ModsPage launcher={launcher} />;
+  } else if (page === "settings") {
+    content = <SettingsPage launcher={launcher} />;
+  } else if (page === "about") {
+    content = <AboutPage />;
   } else {
-    content = <Placeholder title={PAGE_LABELS[page]} />;
+    content = <Placeholder title={PAGE_LABELS[page]} note="Saved servers and Launch and join come with multiplayer support, after Microsoft sign-in." />;
   }
 
   return (

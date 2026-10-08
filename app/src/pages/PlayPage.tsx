@@ -29,7 +29,7 @@ function cleanNote(status: InstanceStatus | null): string {
     .filter((m) => m.managed && m.wanted && !m.required && !(m.skipped && !m.installed))
     .map((m) => m.title);
   const fabric = status.loaderVersion ? `Fabric ${status.loaderVersion}` : "Fabric";
-  return `${fabric} with ${listTitles(titles)}.`;
+  return `${fabric} with ${listTitles([...titles, "the Esteban HUD"])}.`;
 }
 
 function progressLine(p: Progress, rate: number | null): string {

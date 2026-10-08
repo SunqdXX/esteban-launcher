@@ -5,14 +5,17 @@ mod progress;
 
 use esteban_core::net::Net;
 use esteban_core::paths::Paths;
+use esteban_core::profile::Settings;
 
 fn state() -> esteban_core::Result<commands::AppState> {
-    let base = match std::env::var_os("ESTEBAN_HOME") {
+    let home: std::path::PathBuf = match std::env::var_os("ESTEBAN_HOME") {
         Some(dir) => dir.into(),
         None => Paths::default_base()?,
     };
+    let paths = tauri::async_runtime::block_on(Settings::paths(home.clone()))?;
     Ok(commands::AppState {
-        paths: Paths::new(base),
+        home,
+        paths: std::sync::RwLock::new(paths),
         net: Net::launcher()?,
         busy: tokio::sync::Mutex::new(()),
     })
@@ -27,6 +30,7 @@ fn main() {
         }
     };
     let result = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
@@ -37,6 +41,17 @@ fn main() {
             commands::set_mod,
             commands::install,
             commands::open_folder,
+            commands::launcher_settings,
+            commands::set_memory,
+            commands::set_jvm_args,
+            commands::check_java,
+            commands::set_java,
+            commands::pick_folder,
+            commands::pick_java,
+            commands::set_data_dir,
+            commands::packs,
+            commands::about,
+            commands::open_link,
         ])
         .run(tauri::generate_context!());
     if let Err(error) = result {

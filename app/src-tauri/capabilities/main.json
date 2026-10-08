@@ -17,6 +17,17 @@
     "allow-instance-status",
     "allow-set-mod",
     "allow-install",
-    "allow-open-folder"
+    "allow-open-folder",
+    "allow-launcher-settings",
+    "allow-set-memory",
+    "allow-set-jvm-args",
+    "allow-check-java",
+    "allow-set-java",
+    "allow-pick-folder",
+    "allow-pick-java",
+    "allow-set-data-dir",
+    "allow-packs",
+    "allow-about",
+    "allow-open-link"
   ]
 }

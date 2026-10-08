@@ -2,11 +2,11 @@
 
 ## Placeholders
 
-- [ ] Servers, Settings and About are still empty screens that say "Not built yet". Settings and About come in the next part of M4, Servers in M6.
-- [ ] Play installs and verifies, then stops: launching needs Microsoft sign-in (M2). The account card is a placeholder with a disabled Sign in button.
-- [ ] The launcher doesn't install the Esteban HUD jar yet. There is no HUD release to pin, it comes with the signed channel (M5) or a pinned HUD release, whichever the owner picks.
+- [ ] Servers is still an empty screen. Saved servers and Launch and join come in M6, after sign-in.
+- [ ] Play installs and verifies, then stops: launching needs Microsoft sign-in (M2). The account card on Play and the Account section in Settings are placeholders with disabled Sign in buttons.
 - [ ] The disclaimer lives in the sidebar footer. The About screen copy comes in M4.
-- [ ] The hacks jar comes from the pinned v1.3.0 release (`esteban.rs`, hash checked). It is replaced by the signed `versions.json` channel in M5.
+- [ ] The HUD jar (both modes) and the hacks jar (Hacked only) come from the pinned esteban v1.4.0 release (`esteban.rs`, sha256 checked). They are replaced by the signed `versions.json` channel in M5. The v1.3.0 hacks hashes stay on the clean guard's list.
+- [ ] A Java picked in Settings is checked to be Java, but not yet against the major version each Minecraft version needs. A wrong one fails at launch with Java's own error.
 - [ ] Launching needs Microsoft sign-in (M2). Until then only install, plan and mods work.
 
 ## Known gaps
@@ -23,7 +23,7 @@
 
 - [ ] Mojang approval of the registered client ID. Blocks M2.
 - [ ] App icon: right now it is the full logo on a square canvas of its own background color. Decide on a square cut of the logo for small icon sizes.
-- [ ] `config/donate.json` with public BTC, XMR and USDC addresses (M4).
+- [ ] Fill `config/donate.json`: public BTC, XMR and USDC addresses (plus the USDC network) and the Discord invite. Empty fields show "Address not set yet" and "Discord, soon" in About.
 - [ ] Signing keys for `versions.json` and the updater, kept offline (M5, M7).
 
 ## Later

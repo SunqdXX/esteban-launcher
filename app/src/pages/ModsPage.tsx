@@ -84,13 +84,13 @@ export default function ModsPage({ launcher }: ModsPageProps) {
             </li>
           );
         })}
-        {status?.extras.map((name) => (
-          <li key={name} className={cx(styles.row, styles.hackedRow)}>
+        {status?.extras.map((extra) => (
+          <li key={extra.file} className={cx(styles.row, extra.hacks && styles.hackedRow)}>
             <div className={styles.what}>
-              <span className={styles.name}>Esteban hacks mod</span>
-              <span className={styles.state}>{name}</span>
+              <span className={styles.name}>{extra.title}</span>
+              <span className={styles.state}>{extra.file}</span>
             </div>
-            <span className={cx(styles.badge, styles.redBadge)}>Hacked only</span>
+            <span className={cx(styles.badge, extra.hacks && styles.redBadge)}>{extra.hacks ? "Hacked only" : "Ours"}</span>
           </li>
         ))}
       </ul>

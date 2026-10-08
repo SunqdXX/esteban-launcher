@@ -1,20 +1,44 @@
+use std::path::PathBuf;
+use std::sync::RwLock;
+
 use esteban_core::install::{InstallOptions, install as install_instance};
+use esteban_core::launch::jvm;
 use esteban_core::net::Net;
+use esteban_core::packs::{self, Imported, Linked};
 use esteban_core::paths::Paths;
 use esteban_core::profile::{HACKS_WARNING, Instance, ProfileKind, Settings};
 use esteban_core::status::{InstanceStatus, status};
 use esteban_core::versions::{DEFAULT_GAME_VERSION, GAME_VERSIONS, GameVersion, is_supported};
-use serde::Serialize;
+use esteban_core::{java, system};
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use tokio::sync::Mutex;
 
 use crate::progress::UiProgress;
 
 pub struct AppState {
-    pub paths: Paths,
+    pub home: PathBuf,
+    pub paths: RwLock<Paths>,
     pub net: Net,
     pub busy: Mutex<()>,
+}
+
+impl AppState {
+    fn paths(&self) -> Paths {
+        match self.paths.read() {
+            Ok(paths) => paths.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    fn set_paths(&self, paths: Paths) {
+        match self.paths.write() {
+            Ok(mut current) => *current = paths,
+            Err(poisoned) => *poisoned.into_inner() = paths,
+        }
+    }
 }
 
 type Reply<T> = Result<T, String>;
@@ -51,12 +75,20 @@ fn instance(state: &AppState, game_version: &str, profile: ProfileKind) -> Reply
             "{game_version} isn't one of the versions this launcher supports."
         ));
     }
-    Instance::new(&state.paths, profile, game_version).map_err(human)
+    Instance::new(&state.paths(), profile, game_version).map_err(human)
+}
+
+async fn load_settings(state: &AppState) -> Reply<Settings> {
+    Settings::load(&state.paths()).await.map_err(human)
+}
+
+async fn save_settings(state: &AppState, settings: &Settings) -> Reply<()> {
+    settings.save(&state.paths()).await.map_err(human)
 }
 
 #[tauri::command]
 pub async fn overview(state: State<'_, AppState>) -> Reply<Overview> {
-    let settings = Settings::load(&state.paths).await.map_err(human)?;
+    let settings = load_settings(&state).await?;
     let game_version = settings
         .game_version
         .filter(|v| is_supported(v))
@@ -82,17 +114,17 @@ pub async fn select(
     profile: ProfileKind,
 ) -> Reply<()> {
     instance(&state, &game_version, profile)?;
-    let mut settings = Settings::load(&state.paths).await.map_err(human)?;
+    let mut settings = load_settings(&state).await?;
     settings.game_version = Some(game_version);
     settings.profile = Some(profile);
-    settings.save(&state.paths).await.map_err(human)
+    save_settings(&state, &settings).await
 }
 
 #[tauri::command]
 pub async fn accept_hacks_warning(state: State<'_, AppState>) -> Reply<()> {
-    let mut settings = Settings::load(&state.paths).await.map_err(human)?;
+    let mut settings = load_settings(&state).await?;
     settings.hacks_warning_accepted = true;
-    settings.save(&state.paths).await.map_err(human)
+    save_settings(&state, &settings).await
 }
 
 #[tauri::command]
@@ -130,7 +162,7 @@ pub async fn install(
 ) -> Reply<InstallSummary> {
     instance(&state, &game_version, profile)?;
     if profile == ProfileKind::Hacks {
-        let settings = Settings::load(&state.paths).await.map_err(human)?;
+        let settings = load_settings(&state).await?;
         if !settings.hacks_warning_accepted {
             return Err("Accept the Hacked warning first.".into());
         }
@@ -139,7 +171,7 @@ pub async fn install(
         return Err("Already installing. Wait for it to finish.".into());
     };
     let net = state.net.clone();
-    let paths = state.paths.clone();
+    let paths = state.paths();
     tauri::async_runtime::spawn_blocking(move || {
         let progress = UiProgress::new(app);
         let result = tauri::async_runtime::block_on(install_instance(
@@ -186,4 +218,368 @@ pub async fn open_folder(
     app.opener()
         .open_path(instance.dir.to_string_lossy(), None::<&str>)
         .map_err(|e| format!("Could not open {}: {e}", instance.dir.display()))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LauncherSettings {
+    memory_mb: Option<u64>,
+    auto_memory_mb: u64,
+    min_memory_mb: u64,
+    max_memory_mb: u64,
+    total_memory_mb: u64,
+    jvm_args: String,
+    java_path: Option<String>,
+    data_dir: String,
+    default_data_dir: String,
+    pack_sources: Vec<String>,
+}
+
+fn join_args(args: &[String]) -> String {
+    args.iter()
+        .map(|a| {
+            if a.contains(char::is_whitespace) {
+                format!("\"{a}\"")
+            } else {
+                a.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[tauri::command]
+pub async fn launcher_settings(state: State<'_, AppState>) -> Reply<LauncherSettings> {
+    let settings = load_settings(&state).await?;
+    let total = system::total_memory_bytes();
+    let (_, auto) = jvm::heap_mb(total);
+    Ok(LauncherSettings {
+        memory_mb: settings.memory_mb,
+        auto_memory_mb: auto,
+        min_memory_mb: jvm::MIN_HEAP_MB,
+        max_memory_mb: jvm::heap_limit_mb(total),
+        total_memory_mb: total / (1024 * 1024),
+        jvm_args: join_args(&settings.jvm_args),
+        java_path: settings.java_path.map(|p| p.display().to_string()),
+        data_dir: state.paths().base().display().to_string(),
+        default_data_dir: state.home.display().to_string(),
+        pack_sources: packs::known_sources()
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect(),
+    })
+}
+
+#[tauri::command]
+pub async fn set_memory(state: State<'_, AppState>, memory_mb: Option<u64>) -> Reply<()> {
+    if let Some(mb) = memory_mb {
+        let limit = jvm::heap_limit_mb(system::total_memory_bytes());
+        if !(jvm::MIN_HEAP_MB..=limit).contains(&mb) {
+            return Err(format!("Pick between {} and {limit} MB.", jvm::MIN_HEAP_MB));
+        }
+    }
+    let mut settings = load_settings(&state).await?;
+    settings.memory_mb = memory_mb;
+    save_settings(&state, &settings).await
+}
+
+#[tauri::command]
+pub async fn set_jvm_args(state: State<'_, AppState>, text: String) -> Reply<String> {
+    let args = jvm::parse_extra_args(&text).map_err(human)?;
+    let mut settings = load_settings(&state).await?;
+    settings.jvm_args = args;
+    save_settings(&state, &settings).await?;
+    Ok(join_args(&settings.jvm_args))
+}
+
+#[tauri::command]
+pub async fn check_java(path: String) -> Reply<String> {
+    java::probe(&PathBuf::from(path)).await.map_err(human)
+}
+
+#[tauri::command]
+pub async fn set_java(state: State<'_, AppState>, path: Option<String>) -> Reply<Option<String>> {
+    let version = match &path {
+        Some(p) => Some(java::probe(&PathBuf::from(p)).await.map_err(human)?),
+        None => None,
+    };
+    let mut settings = load_settings(&state).await?;
+    settings.java_path = path.map(PathBuf::from);
+    save_settings(&state, &settings).await?;
+    Ok(version)
+}
+
+#[tauri::command]
+pub async fn pick_folder(app: AppHandle) -> Reply<Option<String>> {
+    let picked =
+        tauri::async_runtime::spawn_blocking(move || app.dialog().file().blocking_pick_folder())
+            .await
+            .map_err(|e| format!("The folder picker stopped: {e}"))?;
+    Ok(picked
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.display().to_string()))
+}
+
+#[tauri::command]
+pub async fn pick_java(app: AppHandle) -> Reply<Option<String>> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Pick a java executable")
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| format!("The file picker stopped: {e}"))?;
+    Ok(picked
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.display().to_string()))
+}
+
+#[tauri::command]
+pub async fn set_data_dir(state: State<'_, AppState>, path: Option<String>) -> Reply<String> {
+    let Ok(_busy) = state.busy.try_lock() else {
+        return Err("Wait for the install to finish first.".into());
+    };
+    let target = path.as_ref().map(PathBuf::from);
+    if let Some(dir) = &target {
+        if !dir.is_absolute() {
+            return Err("Pick a full folder path.".into());
+        }
+        tokio::fs::create_dir_all(dir)
+            .await
+            .map_err(|e| format!("Can't use {}: {e}", dir.display()))?;
+        let probe = dir.join(".esteban-write-test");
+        tokio::fs::write(&probe, b"ok")
+            .await
+            .map_err(|e| format!("Can't write to {}: {e}", dir.display()))?;
+        tokio::fs::remove_file(&probe)
+            .await
+            .map_err(|e| format!("Can't clean up in {}: {e}", dir.display()))?;
+    }
+    let home = Paths::new(state.home.clone());
+    let mut settings = Settings::load(&home).await.map_err(human)?;
+    settings.data_dir = target.filter(|d| *d != state.home);
+    settings.save(&home).await.map_err(human)?;
+    let paths = Settings::paths(state.home.clone()).await.map_err(human)?;
+    let shown = paths.base().display().to_string();
+    state.set_paths(paths);
+    Ok(shown)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackLine {
+    folder: &'static str,
+    text: String,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum PackAction {
+    Link,
+    Import,
+}
+
+#[tauri::command]
+pub async fn packs(
+    state: State<'_, AppState>,
+    action: PackAction,
+    from: String,
+    game_version: String,
+    profile: ProfileKind,
+) -> Reply<Vec<PackLine>> {
+    let instance = instance(&state, &game_version, profile)?;
+    let from = PathBuf::from(from);
+    if !from.is_dir() {
+        return Err(format!("{} isn't a folder.", from.display()));
+    }
+    let lines = match action {
+        PackAction::Link => packs::link(&instance, &from)
+            .await
+            .map_err(human)?
+            .into_iter()
+            .map(|(folder, outcome)| PackLine {
+                folder,
+                text: match outcome {
+                    Linked::Linked(to) => format!("linked to {}", to.display()),
+                    Linked::AlreadyLinked(to) => format!("already linked to {}", to.display()),
+                    Linked::Relinked { to, .. } => format!("now linked to {}", to.display()),
+                    Linked::NotInSource => "not in that folder, skipped".into(),
+                    Linked::HasFiles => {
+                        "already has files here, left alone (use Copy instead)".into()
+                    }
+                },
+            })
+            .collect(),
+        PackAction::Import => packs::import(&instance, &from)
+            .await
+            .map_err(human)?
+            .into_iter()
+            .map(|(folder, outcome)| PackLine {
+                folder,
+                text: match outcome {
+                    Imported::Copied {
+                        copied,
+                        kept,
+                        skipped_links,
+                    } => {
+                        let mut text = format!("copied {copied} files");
+                        if kept > 0 {
+                            text.push_str(&format!(", kept {kept} you already had"));
+                        }
+                        if skipped_links > 0 {
+                            text.push_str(&format!(", skipped {skipped_links} links"));
+                        }
+                        text
+                    }
+                    Imported::IsLinked(to) => {
+                        format!("linked to {}, nothing to copy", to.display())
+                    }
+                    Imported::NotInSource => "not in that folder, skipped".into(),
+                },
+            })
+            .collect(),
+    };
+    Ok(lines)
+}
+
+const DONATE: &str = include_str!("../../../config/donate.json");
+const GITHUB: &str = "https://github.com/SunqdXX/esteban-launcher";
+const ESTEBAN: &str = "https://github.com/SunqdXX/esteban";
+
+#[derive(Deserialize, Default)]
+struct Donate {
+    #[serde(default)]
+    discord: String,
+    #[serde(default)]
+    btc: String,
+    #[serde(default)]
+    xmr: String,
+    #[serde(default)]
+    usdc: String,
+    #[serde(default)]
+    usdc_network: String,
+}
+
+fn donate() -> Donate {
+    serde_json::from_str(DONATE).unwrap_or_default()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Coin {
+    name: &'static str,
+    note: String,
+    address: String,
+    qr: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct About {
+    version: &'static str,
+    disclaimer: &'static str,
+    discord: bool,
+    coins: Vec<Coin>,
+}
+
+fn qr_rows(text: &str) -> Vec<String> {
+    let Ok(code) = qrcode::QrCode::new(text.as_bytes()) else {
+        return Vec::new();
+    };
+    let width = code.width();
+    code.to_colors()
+        .chunks(width)
+        .map(|row| {
+            row.iter()
+                .map(|c| if *c == qrcode::Color::Dark { '1' } else { '0' })
+                .collect()
+        })
+        .collect()
+}
+
+fn coin(name: &'static str, note: String, address: &str) -> Coin {
+    let address = address.trim().to_string();
+    Coin {
+        name,
+        note,
+        qr: if address.is_empty() {
+            Vec::new()
+        } else {
+            qr_rows(&address)
+        },
+        address,
+    }
+}
+
+#[tauri::command]
+pub fn about() -> About {
+    let config = donate();
+    let usdc_note = if config.usdc_network.trim().is_empty() {
+        String::new()
+    } else {
+        format!("on {}", config.usdc_network.trim())
+    };
+    About {
+        version: esteban_core::VERSION,
+        disclaimer: esteban_core::DISCLAIMER,
+        discord: !config.discord.trim().is_empty(),
+        coins: vec![
+            coin("Bitcoin", String::new(), &config.btc),
+            coin("Monero", String::new(), &config.xmr),
+            coin("USDC", usdc_note, &config.usdc),
+        ],
+    }
+}
+
+#[tauri::command]
+pub fn open_link(app: AppHandle, which: String) -> Reply<()> {
+    let config = donate();
+    let url = match which.as_str() {
+        "github" => GITHUB.to_string(),
+        "esteban" => ESTEBAN.to_string(),
+        "discord"
+            if config.discord.starts_with("https://discord.gg/")
+                || config.discord.starts_with("https://discord.com/invite/") =>
+        {
+            config.discord.clone()
+        }
+        _ => return Err("That link isn't available.".into()),
+    };
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| format!("Could not open the link: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn qr_rows_are_a_square_with_finder_patterns() {
+        let rows = qr_rows("bc1qexampleexampleexampleexample");
+        assert!(rows.len() >= 21);
+        assert!(rows.iter().all(|r| r.len() == rows.len()));
+        assert!(rows[0].starts_with("1111111"));
+        assert!(rows[0].ends_with("1111111"));
+    }
+
+    #[test]
+    fn empty_addresses_have_no_qr_and_the_shipped_config_parses() {
+        let empty = coin("Bitcoin", String::new(), "   ");
+        assert!(empty.address.is_empty() && empty.qr.is_empty());
+        let parsed: Donate = serde_json::from_str(DONATE).unwrap();
+        assert!(parsed.discord.is_empty() || parsed.discord.starts_with("https://"));
+    }
+
+    #[test]
+    fn jvm_args_round_trip_with_quotes() {
+        let args = vec!["-XX:+UseZGC".to_string(), "-Dname=a b".to_string()];
+        let text = join_args(&args);
+        assert_eq!(text, "-XX:+UseZGC \"-Dname=a b\"");
+        assert_eq!(
+            jvm::parse_extra_args(&text).unwrap(),
+            vec!["-XX:+UseZGC", "-Dname=a b"]
+        );
+    }
 }
