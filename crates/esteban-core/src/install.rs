@@ -126,6 +126,8 @@ pub async fn install(
         }
     }
 
+    instance.ensure_custom_backgrounds().await?;
+
     let mut meta = instance.read_meta().await?;
     let loader_version = match (&meta.loader_version, options.update) {
         (Some(pinned), false) => pinned.clone(),

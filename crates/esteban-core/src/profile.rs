@@ -19,6 +19,8 @@ pub const HACKS_WARNING: &str = "Most servers ban this. You are responsible for 
 
 pub const NEW_INSTANCE_OPTIONS: &[(&str, &str)] = &[("guiScale", "3")];
 
+pub const CUSTOM_BACKGROUNDS: &str = "custom-backgrounds";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProfileKind {
@@ -96,6 +98,14 @@ impl Instance {
 
     pub fn crash_reports_dir(&self) -> PathBuf {
         self.dir.join("crash-reports")
+    }
+
+    pub fn custom_backgrounds_dir(&self) -> PathBuf {
+        self.dir.join(CUSTOM_BACKGROUNDS)
+    }
+
+    pub async fn ensure_custom_backgrounds(&self) -> Result<()> {
+        fsx::create_dir(&self.custom_backgrounds_dir()).await
     }
 
     pub fn options_path(&self) -> PathBuf {
@@ -336,6 +346,18 @@ mod tests {
             writer.finish().unwrap();
         }
         out.into_inner()
+    }
+
+    #[tokio::test]
+    async fn custom_backgrounds_folder_is_created_and_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let instance = Instance::new(&Paths::new(dir.path()), ProfileKind::Clean, "26.3").unwrap();
+        instance.ensure_custom_backgrounds().await.unwrap();
+        let folder = instance.dir.join("custom-backgrounds");
+        assert!(folder.is_dir());
+        std::fs::write(folder.join("mine.png"), b"png").unwrap();
+        instance.ensure_custom_backgrounds().await.unwrap();
+        assert_eq!(std::fs::read(folder.join("mine.png")).unwrap(), b"png");
     }
 
     async fn clean_instance() -> (tempfile::TempDir, Instance) {
