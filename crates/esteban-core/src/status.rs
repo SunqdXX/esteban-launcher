@@ -19,6 +19,30 @@ pub struct ModRow {
     pub skipped: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtraJar {
+    pub file: String,
+    pub title: String,
+    pub hacks: bool,
+}
+
+impl ExtraJar {
+    fn from_file(file: &str) -> Self {
+        let hacks = !file.starts_with("esteban-hud-");
+        Self {
+            file: file.to_string(),
+            title: if hacks {
+                "Esteban hacks mod"
+            } else {
+                "Esteban HUD"
+            }
+            .to_string(),
+            hacks,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstanceStatus {
@@ -27,7 +51,7 @@ pub struct InstanceStatus {
     pub installed: bool,
     pub loader_version: Option<String>,
     pub mods: Vec<ModRow>,
-    pub extras: Vec<String>,
+    pub extras: Vec<ExtraJar>,
     pub unmanaged: Vec<String>,
     pub folder: PathBuf,
 }
@@ -86,7 +110,9 @@ pub async fn status(instance: &Instance) -> Result<InstanceStatus> {
         installed: lock.is_some(),
         loader_version: meta.loader_version,
         mods,
-        extras: lock.map(|l| l.extras).unwrap_or_default(),
+        extras: lock
+            .map(|l| l.extras.iter().map(|f| ExtraJar::from_file(f)).collect())
+            .unwrap_or_default(),
         unmanaged,
         folder: instance.dir.clone(),
     })
@@ -139,7 +165,10 @@ mod tests {
                 resolved("lithium", "Lithium", "0.20.0"),
                 resolved("indium", "Indium", "1.0.0"),
             ],
-            extras: vec!["esteban-1.3.0+26.1.jar".into()],
+            extras: vec![
+                "esteban-hud-1.4.0+26.1.jar".into(),
+                "esteban-1.4.0+26.1.jar".into(),
+            ],
             skipped: vec![Skipped {
                 title: "Iris Shaders".into(),
                 message: "Iris Shaders isn't available for 26.1 yet, so it was skipped.".into(),
@@ -174,7 +203,9 @@ mod tests {
                 .contains("isn't available for 26.1")
         );
         assert!(!row("indium").managed && row("indium").installed);
-        assert_eq!(s.extras, vec!["esteban-1.3.0+26.1.jar".to_string()]);
+        assert_eq!(s.extras.len(), 2);
+        assert!(!s.extras[0].hacks && s.extras[0].title == "Esteban HUD");
+        assert!(s.extras[1].hacks && s.extras[1].file == "esteban-1.4.0+26.1.jar");
         assert_eq!(s.unmanaged, vec!["mine.jar".to_string()]);
     }
 }

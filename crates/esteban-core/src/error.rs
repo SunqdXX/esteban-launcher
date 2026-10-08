@@ -55,6 +55,8 @@ pub enum Error {
     Account(String),
     #[error("{0}")]
     Mods(String),
+    #[error("{0}")]
+    Settings(String),
     #[error("could not read {path} as a jar: {source}")]
     Zip {
         path: PathBuf,

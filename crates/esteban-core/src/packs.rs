@@ -7,6 +7,20 @@ use crate::{Error, Result, fsx};
 
 pub const PACK_FOLDERS: &[&str] = &["shaderpacks", "resourcepacks", "screenshots"];
 
+pub fn known_sources() -> Vec<PathBuf> {
+    let Some(dirs) = directories::BaseDirs::new() else {
+        return Vec::new();
+    };
+    let candidates = if cfg!(windows) {
+        vec![dirs.data_dir().join(".minecraft")]
+    } else if cfg!(target_os = "macos") {
+        vec![dirs.data_dir().join("minecraft")]
+    } else {
+        vec![dirs.home_dir().join(".minecraft")]
+    };
+    candidates.into_iter().filter(|p| p.is_dir()).collect()
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Linked {
     Linked(PathBuf),

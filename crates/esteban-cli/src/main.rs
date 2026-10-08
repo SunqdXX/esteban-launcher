@@ -7,7 +7,7 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand};
 use esteban_core::account::{Secret, Session};
 use esteban_core::install::{InstallOptions, Installed, install};
-use esteban_core::launch::{self, LaunchOptions, QuickPlay, Smoke};
+use esteban_core::launch::{self, QuickPlay, Smoke};
 use esteban_core::modrinth::DEFAULT_MODS;
 use esteban_core::net::Net;
 use esteban_core::packs::{self, Imported, Linked};
@@ -190,11 +190,11 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<(), Failure> {
-    let base = match cli.base_dir {
+    let home = match cli.base_dir {
         Some(dir) => dir,
         None => Paths::default_base()?,
     };
-    let paths = Paths::new(base);
+    let paths = Settings::paths(home).await?;
     let net = Net::launcher()?;
     match cli.command {
         Command::Install(target) => {
@@ -311,7 +311,12 @@ async fn list_mods(paths: &Paths, selector: &Selector) -> Result<(), Failure> {
         println!("  on    {:width$}  {}{note}", m.title, m.version_number);
     }
     for extra in &lock.extras {
-        println!("  on    {extra}  hacks mod");
+        let what = if extra.starts_with("esteban-hud-") {
+            "Esteban HUD"
+        } else {
+            "hacks mod"
+        };
+        println!("  on    {extra}  {what}");
     }
     for slug in &meta.disabled {
         let title = DEFAULT_MODS
@@ -472,11 +477,9 @@ async fn launch(net: &Net, paths: &Paths, args: LaunchArgs, dry_run: bool) -> Re
         (None, Some(world)) => Some(QuickPlay::Singleplayer(world.clone())),
         (None, None) => None,
     };
-    let options = LaunchOptions {
-        quick_play,
-        max_heap_mb: args.memory,
-        extra_jvm_args: Vec::new(),
-    };
+    let options = Settings::load(paths)
+        .await?
+        .launch_options(quick_play, args.memory);
     let plan = launch::build(&installed, &session, &options, &installed.platform)?;
     if dry_run {
         println!("{}", plan.command_line());

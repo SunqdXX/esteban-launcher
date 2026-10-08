@@ -6,7 +6,7 @@ use serde::Deserialize;
 
 use crate::download::{self, Download, Stats};
 use crate::error::IoContext;
-use crate::esteban::HACKS_MOD_ID;
+use crate::esteban;
 use crate::fabric::{self, FabricProfile};
 use crate::hash::Hash;
 use crate::java::{self, JavaRuntime};
@@ -205,17 +205,19 @@ pub async fn install(
             executable: false,
         });
     }
-    let extras = instance.extra_downloads();
-    if kind == ProfileKind::Hacks && extras.is_empty() {
+    let artifacts = instance.extra_artifacts();
+    if esteban::hud_for(&game).is_none() {
+        progress.notice(&format!(
+            "The Esteban HUD isn't published for {game} yet, so it's missing."
+        ));
+    }
+    if kind == ProfileKind::Hacks && esteban::hacks_for(&game).is_none() {
         progress.notice(&format!(
             "Esteban isn't published for {game} yet, so the hacks mod is missing."
         ));
     }
-    let mut extra_names: Vec<String> = extras
-        .iter()
-        .filter_map(|d| d.dest.file_name().map(|n| n.to_string_lossy().into_owned()))
-        .collect();
-    mod_downloads.extend(extras);
+    let mut extra_names: Vec<String> = artifacts.iter().map(|a| a.filename.to_string()).collect();
+    mod_downloads.extend(instance.extra_downloads());
     stats.add(download::ensure_all(net, mod_downloads, 8, progress, "mods").await?);
 
     let env = Environment {
@@ -231,11 +233,13 @@ pub async fn install(
     let managed: Vec<(String, String, String)> = mods
         .iter()
         .map(|m| (m.filename.clone(), m.title.clone(), m.slug.clone()))
-        .chain(
-            extra_names
-                .iter()
-                .map(|n| (n.clone(), "Esteban".to_string(), HACKS_MOD_ID.to_string())),
-        )
+        .chain(artifacts.iter().map(|a| {
+            (
+                a.filename.to_string(),
+                a.title().to_string(),
+                a.mod_id().to_string(),
+            )
+        }))
         .collect();
     let mut infos = Vec::new();
     let mut unreadable = false;

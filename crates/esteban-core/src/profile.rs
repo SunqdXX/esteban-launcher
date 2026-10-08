@@ -214,20 +214,26 @@ impl Instance {
         Ok(out)
     }
 
+    pub fn extra_artifacts(&self) -> Vec<esteban::Artifact> {
+        let hud = esteban::hud_for(&self.game_version);
+        let hacks = match self.kind {
+            ProfileKind::Clean => None,
+            ProfileKind::Hacks => esteban::hacks_for(&self.game_version),
+        };
+        hud.into_iter().chain(hacks).collect()
+    }
+
     pub fn extra_downloads(&self) -> Vec<Download> {
-        match self.kind {
-            ProfileKind::Clean => Vec::new(),
-            ProfileKind::Hacks => esteban::hacks_for(&self.game_version)
-                .map(|artifact| Download {
-                    url: artifact.url.to_string(),
-                    dest: self.mods_dir().join(artifact.filename),
-                    hash: Hash::sha256(artifact.sha256),
-                    size: Some(artifact.size),
-                    executable: false,
-                })
-                .into_iter()
-                .collect(),
-        }
+        self.extra_artifacts()
+            .into_iter()
+            .map(|artifact| Download {
+                url: artifact.url.to_string(),
+                dest: self.mods_dir().join(artifact.filename),
+                hash: Hash::sha256(artifact.sha256),
+                size: Some(artifact.size),
+                executable: false,
+            })
+            .collect()
     }
 
     pub async fn guard(&self) -> Result<()> {
@@ -310,9 +316,39 @@ pub struct Settings {
     pub game_version: Option<String>,
     #[serde(default)]
     pub profile: Option<ProfileKind>,
+    #[serde(default)]
+    pub data_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub memory_mb: Option<u64>,
+    #[serde(default)]
+    pub jvm_args: Vec<String>,
+    #[serde(default)]
+    pub java_path: Option<PathBuf>,
 }
 
 impl Settings {
+    pub async fn paths(home: PathBuf) -> Result<Paths> {
+        let probe = Paths::new(home.clone());
+        let settings = Self::load(&probe).await?;
+        Ok(match settings.data_dir {
+            Some(data) => Paths::with_data(home, data),
+            None => probe,
+        })
+    }
+
+    pub fn launch_options(
+        &self,
+        quick_play: Option<crate::launch::QuickPlay>,
+        memory_override: Option<u64>,
+    ) -> crate::launch::LaunchOptions {
+        crate::launch::LaunchOptions {
+            quick_play,
+            max_heap_mb: memory_override.or(self.memory_mb),
+            extra_jvm_args: self.jvm_args.clone(),
+            java: self.java_path.clone(),
+        }
+    }
+
     pub async fn load(paths: &Paths) -> Result<Self> {
         let path = paths.settings_file();
         match tokio::fs::read(&path).await {
@@ -374,15 +410,57 @@ mod tests {
         (dir, instance)
     }
 
+    #[tokio::test]
+    async fn the_data_folder_moves_but_settings_stay_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let data = dir.path().join("data");
+        let settings = Settings {
+            data_dir: Some(data.clone()),
+            memory_mb: Some(6144),
+            jvm_args: vec!["-XX:+UseZGC".into()],
+            ..Settings::default()
+        };
+        settings.save(&Paths::new(&home)).await.unwrap();
+        let resolved = Settings::paths(home.clone()).await.unwrap();
+        assert_eq!(resolved.home(), home);
+        assert_eq!(resolved.settings_file(), home.join("settings.json"));
+        assert_eq!(resolved.instances(), data.join("instances"));
+        let options = settings.launch_options(None, None);
+        assert_eq!(options.max_heap_mb, Some(6144));
+        assert_eq!(options.extra_jvm_args, vec!["-XX:+UseZGC".to_string()]);
+        assert_eq!(
+            settings.launch_options(None, Some(2048)).max_heap_mb,
+            Some(2048)
+        );
+    }
+
     #[test]
     fn clean_profile_never_gets_the_hacks_jar() {
         let paths = Paths::new("/base");
-        let clean = Instance::new(&paths, ProfileKind::Clean, "1.21.4").unwrap();
-        assert!(clean.extra_downloads().is_empty());
-        let hacks = Instance::new(&paths, ProfileKind::Hacks, "1.21.4").unwrap();
-        let extras = hacks.extra_downloads();
-        assert_eq!(extras.len(), 1);
-        assert!(extras[0].dest.starts_with(hacks.mods_dir()));
+        for version in crate::versions::GAME_VERSIONS {
+            let clean = Instance::new(&paths, ProfileKind::Clean, version.id).unwrap();
+            let kinds: Vec<_> = clean.extra_artifacts().iter().map(|a| a.kind).collect();
+            assert_eq!(kinds, vec![esteban::ArtifactKind::Hud]);
+            assert!(
+                clean
+                    .extra_artifacts()
+                    .iter()
+                    .all(|a| !esteban::is_known_hacks_jar(a.sha256))
+            );
+            let hacks = Instance::new(&paths, ProfileKind::Hacks, version.id).unwrap();
+            let kinds: Vec<_> = hacks.extra_artifacts().iter().map(|a| a.kind).collect();
+            assert_eq!(
+                kinds,
+                vec![esteban::ArtifactKind::Hud, esteban::ArtifactKind::Hacks]
+            );
+            assert!(
+                hacks
+                    .extra_downloads()
+                    .iter()
+                    .all(|d| d.dest.starts_with(hacks.mods_dir()))
+            );
+        }
     }
 
     #[test]

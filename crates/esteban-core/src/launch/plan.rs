@@ -19,6 +19,7 @@ pub struct LaunchOptions {
     pub quick_play: Option<QuickPlay>,
     pub max_heap_mb: Option<u64>,
     pub extra_jvm_args: Vec<String>,
+    pub java: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -162,7 +163,10 @@ pub fn build(
     );
 
     Ok(LaunchPlan {
-        java: installed.java.executable.clone(),
+        java: options
+            .java
+            .clone()
+            .unwrap_or_else(|| installed.java.executable.clone()),
         args: out,
         cwd: instance.dir.clone(),
         secrets: vec![session.access_token.expose().to_string()],

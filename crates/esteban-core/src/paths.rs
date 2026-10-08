@@ -4,12 +4,28 @@ use crate::{Error, Result};
 
 #[derive(Clone, Debug)]
 pub struct Paths {
+    home: PathBuf,
     base: PathBuf,
 }
 
 impl Paths {
     pub fn new(base: impl Into<PathBuf>) -> Self {
-        Self { base: base.into() }
+        let base = base.into();
+        Self {
+            home: base.clone(),
+            base,
+        }
+    }
+
+    pub fn with_data(home: impl Into<PathBuf>, data: impl Into<PathBuf>) -> Self {
+        Self {
+            home: home.into(),
+            base: data.into(),
+        }
+    }
+
+    pub fn home(&self) -> &Path {
+        &self.home
     }
 
     pub fn default_base() -> Result<PathBuf> {
@@ -59,6 +75,6 @@ impl Paths {
     }
 
     pub fn settings_file(&self) -> PathBuf {
-        self.base.join("settings.json")
+        self.home.join("settings.json")
     }
 }

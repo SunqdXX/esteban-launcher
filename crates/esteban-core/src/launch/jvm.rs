@@ -15,6 +15,65 @@ pub const G1_FLAGS: &[&str] = &[
     "-XX:G1HeapRegionSize=32M",
 ];
 
+pub const MIN_HEAP_MB: u64 = 1024;
+
+pub fn heap_limit_mb(total_memory_bytes: u64) -> u64 {
+    (total_memory_bytes / MIB)
+        .saturating_sub(2048)
+        .max(MIN_HEAP_MB)
+}
+
+pub fn parse_extra_args(text: &str) -> crate::Result<Vec<String>> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    let mut started = false;
+    for c in text.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    args.push(std::mem::take(&mut current));
+                    started = false;
+                }
+            }
+            c => {
+                current.push(c);
+                started = true;
+            }
+        }
+    }
+    if quoted {
+        return Err(crate::Error::Settings(
+            "A quote isn't closed. Add the missing \" and try again.".into(),
+        ));
+    }
+    if started {
+        args.push(current);
+    }
+    for arg in &args {
+        if !arg.starts_with('-') {
+            return Err(crate::Error::Settings(format!(
+                "{arg} isn't a JVM option. They start with a dash, like -XX:+UseZGC."
+            )));
+        }
+        if arg.starts_with("-Xmx") || arg.starts_with("-Xms") {
+            return Err(crate::Error::Settings(format!(
+                "Set the memory with the slider instead of {arg}."
+            )));
+        }
+        if ["-cp", "-classpath", "--class-path", "-jar"].contains(&arg.as_str()) {
+            return Err(crate::Error::Settings(format!(
+                "{arg} would break the launch, the launcher sets the classpath itself."
+            )));
+        }
+    }
+    Ok(args)
+}
+
 pub fn heap_mb(total_memory_bytes: u64) -> (u64, u64) {
     let total = total_memory_bytes / MIB;
     let tier = match total {
@@ -49,6 +108,34 @@ pub fn default_flags(version: &VersionJson, ctx: &Context<'_>, max_heap_mb: u64)
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn extra_args_split_on_spaces_and_keep_quoted_parts() {
+        let args = parse_extra_args("  -XX:+UseZGC   -Dfoo=\"a b\" -Dbar=1 ").unwrap();
+        assert_eq!(args, vec!["-XX:+UseZGC", "-Dfoo=a b", "-Dbar=1"]);
+        assert!(parse_extra_args("   ").unwrap().is_empty());
+    }
+
+    #[test]
+    fn extra_args_refuse_memory_classpath_and_junk() {
+        for bad in [
+            "-Xmx8G",
+            "-Xms1G",
+            "-cp x.jar",
+            "-jar a.jar",
+            "nope",
+            "-Dx=\"open",
+        ] {
+            assert!(parse_extra_args(bad).is_err(), "{bad} should be refused");
+        }
+    }
+
+    #[test]
+    fn the_heap_limit_leaves_room_for_the_system() {
+        assert_eq!(heap_limit_mb(16 * 1024 * MIB), 14 * 1024);
+        assert_eq!(heap_limit_mb(2 * 1024 * MIB), MIN_HEAP_MB);
+    }
+
     use std::collections::BTreeSet;
 
     use super::*;
