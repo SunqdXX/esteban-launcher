@@ -1,3 +1,4 @@
+import logoUrl from "../assets/logo/EstebanLogo.png";
 import { DISCLAIMER, PAGE_LABELS, PAGES, type PageId } from "../pages";
 import styles from "./Sidebar.module.css";
 
@@ -9,6 +10,9 @@ interface SidebarProps {
 export default function Sidebar({ current, onSelect }: SidebarProps) {
   return (
     <nav className={styles.sidebar} aria-label="Main">
+      <div className={styles.brand}>
+        <img src={logoUrl} alt="Esteban" width={1408} height={768} />
+      </div>
       <ul className={styles.nav}>
         {PAGES.map((page) => (
           <li key={page}>

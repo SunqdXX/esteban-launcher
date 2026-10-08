@@ -29,3 +29,24 @@ export const CLOSE: readonly Cell[] = [
   ...range(1, 8).map((i) => [i, i] as const),
   ...range(1, 8).map((i) => [9 - i, i] as const),
 ];
+
+export const CHEVRON_DOWN: readonly Cell[] = [
+  [1, 3],
+  [2, 4],
+  [3, 5],
+  [4, 6],
+  [5, 6],
+  [6, 5],
+  [7, 4],
+  [8, 3],
+];
+
+export const CHEVRON_UP: readonly Cell[] = CHEVRON_DOWN.map(([x, y]) => [x, 9 - y] as const);
+
+export const FOLDER: readonly Cell[] = [
+  ...range(1, 4).map((x) => [x, 2] as const),
+  ...range(1, 8).map((x) => [x, 3] as const),
+  ...range(1, 8).map((x) => [x, 8] as const),
+  ...range(4, 7).map((y) => [1, y] as const),
+  ...range(4, 7).map((y) => [8, y] as const),
+];

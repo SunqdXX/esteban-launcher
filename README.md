@@ -19,7 +19,8 @@ sign in isnt built yet tho, it waits on mojang approving the app
 - launching needs the microsoft login above, so for now its only tested locally
 - 1.21.4 installs and starts. 26.x installs too, full testing for it comes later
 - mods come from modrinth at install time, nothing gets bundled. if a mod has no build for ur version or wouldnt start next to the others, its skipped and u get told why
-- the app window is just the empty shell so far, the screens come next
+- the app window has the Play, Profiles and Mods screens: pick a version and Normal or Hacked, hit Play and it installs and checks everything with a live progress bar, turn mods on or off, open an instance folder. Servers, Settings and About come next
+- Play stops after the install for now and tells u why: starting the game needs the microsoft sign in
 - tested on linux. windows builds in ci but hasnt been run in game yet
 
 ## what it doesnt do
@@ -56,6 +57,6 @@ cargo run -p esteban-cli -- path --version 1.21.4
 
 ## license
 
-[GPL-3.0](LICENSE). the logo (`app/src/assets/logo/` and the app icons) is not covered by the GPL. fonts are OFL, see [docs/third-party.md](docs/third-party.md)
+[GPL-3.0](LICENSE). the logo (`app/src/assets/logo/` and the app icons) and the screenshots in `app/src/assets/backgrounds/` are not covered by the GPL, see the `NOTICE` there. fonts are OFL, see [docs/third-party.md](docs/third-party.md)
 
 Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.

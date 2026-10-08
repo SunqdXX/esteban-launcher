@@ -1,0 +1,46 @@
+.card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  background: rgba(26, 27, 38, 0.92);
+  border: var(--line) solid var(--border);
+}
+
+.head {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  background: var(--surface);
+}
+
+.head i {
+  display: block;
+}
+
+.head i.on {
+  background: var(--text-dim);
+}
+
+.name {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.hint {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  line-height: 1.3;
+}
+
+.button {
+  height: 32px;
+  padding: 0 14px;
+  border: var(--line) solid var(--border);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: not-allowed;
+}

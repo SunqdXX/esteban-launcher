@@ -1,0 +1,56 @@
+.modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 48px;
+  background: var(--surface-2);
+  border: var(--line) solid var(--border);
+}
+
+.mode {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.mode + .mode {
+  border-left: var(--line) solid var(--border);
+}
+
+.mode:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.mode:disabled {
+  cursor: default;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+}
+
+.on {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--venom);
+}
+
+.on .dot {
+  background: var(--venom);
+}
+
+.on.hacked {
+  box-shadow: inset 0 -2px 0 var(--red);
+}
+
+.on.hacked .dot {
+  background: var(--red);
+}
+
+.compact {
+  height: 36px;
+}

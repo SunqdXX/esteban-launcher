@@ -2,7 +2,9 @@
 
 ## Placeholders
 
-- [ ] Play, Profiles, Mods, Servers, Settings and About are empty screens that say "Not built yet". They are built in M4, after the Play screen mockup is approved.
+- [ ] Servers, Settings and About are still empty screens that say "Not built yet". Settings and About come in the next part of M4, Servers in M6.
+- [ ] Play installs and verifies, then stops: launching needs Microsoft sign-in (M2). The account card is a placeholder with a disabled Sign in button.
+- [ ] The launcher doesn't install the Esteban HUD jar yet. There is no HUD release to pin, it comes with the signed channel (M5) or a pinned HUD release, whichever the owner picks.
 - [ ] The disclaimer lives in the sidebar footer. The About screen copy comes in M4.
 - [ ] The hacks jar comes from the pinned v1.3.0 release (`esteban.rs`, hash checked). It is replaced by the signed `versions.json` channel in M5.
 - [ ] Launching needs Microsoft sign-in (M2). Until then only install, plan and mods work.

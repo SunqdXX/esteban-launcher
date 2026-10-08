@@ -1,0 +1,178 @@
+.play {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.wall {
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.wall.shown {
+  opacity: 1;
+}
+
+.shade {
+  position: absolute;
+  inset: 0;
+  background: rgba(26, 27, 38, 0.32);
+}
+
+.play > :not(.wall, .shade) {
+  position: relative;
+}
+
+.top {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-5) var(--space-5) 0;
+}
+
+.launch {
+  display: grid;
+  grid-template-columns: minmax(180px, 232px) minmax(0, 1fr) minmax(220px, 272px);
+  gap: var(--space-5);
+  align-items: start;
+  padding: 20px var(--space-5) var(--space-5);
+  background: rgba(26, 27, 38, 0.96);
+  border-top: var(--line) solid var(--border);
+}
+
+.label {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.note {
+  margin: 10px 0 0;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+.note b {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.note.warn b {
+  color: var(--red);
+}
+
+.go {
+  width: 100%;
+  height: 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--venom);
+  color: var(--on-venom);
+}
+
+.go:hover:not(:disabled) {
+  background: #5cffa0;
+}
+
+.go:disabled {
+  cursor: progress;
+  background: var(--surface);
+  color: var(--text-dim);
+}
+
+.word {
+  font-family: var(--font-mono);
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+}
+
+.what {
+  margin-top: 6px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.status {
+  margin: 10px 0 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.sq {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  background: var(--muted);
+}
+
+.ok .sq {
+  background: var(--venom);
+}
+
+.info .sq {
+  background: var(--cyan);
+}
+
+.error {
+  color: var(--red);
+}
+
+.error .sq {
+  background: var(--red);
+}
+
+.dim .sq,
+.sq.dim {
+  background: var(--muted);
+}
+
+.statusArea {
+  min-height: 64px;
+}
+
+.progress {
+  margin-top: 10px;
+}
+
+.track {
+  height: 6px;
+  background: var(--surface-2);
+  border: var(--line) solid var(--border);
+}
+
+.fill {
+  height: 100%;
+  background: var(--venom);
+  transition: width var(--dur-fast) linear;
+}
+
+.progress .status {
+  margin-top: 6px;
+}
+
+.notice {
+  margin: 6px 0 0;
+  font-size: var(--text-xs);
+  color: var(--cyan);
+}
