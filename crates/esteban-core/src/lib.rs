@@ -16,7 +16,9 @@ pub mod packs;
 pub mod paths;
 pub mod profile;
 pub mod progress;
+pub mod status;
 pub mod system;
+pub mod versions;
 
 pub use error::{Error, Result};
 

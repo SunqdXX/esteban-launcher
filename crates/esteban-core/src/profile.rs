@@ -306,6 +306,10 @@ fn contains_hacks_mod(bytes: &[u8], path: &Path, depth: u8) -> Result<bool> {
 pub struct Settings {
     #[serde(default)]
     pub hacks_warning_accepted: bool,
+    #[serde(default)]
+    pub game_version: Option<String>,
+    #[serde(default)]
+    pub profile: Option<ProfileKind>,
 }
 
 impl Settings {
