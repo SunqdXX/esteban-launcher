@@ -788,7 +788,8 @@ mod tests {
                 root
             )
             .unwrap(),
-            "/libs/de/oceanlabs/mcp/mcp_config/1.20.1-20230612.114412/mcp_config-1.20.1-20230612.114412.zip"
+            root.join("de/oceanlabs/mcp/mcp_config/1.20.1-20230612.114412/mcp_config-1.20.1-20230612.114412.zip")
+                .to_string_lossy()
         );
         assert_eq!(substitute("--plain", &data, root).unwrap(), "--plain");
         assert!(substitute("{NOPE}", &data, root).is_err());
