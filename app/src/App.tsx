@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api } from "./api";
 import styles from "./App.module.css";
 import Placeholder from "./components/Placeholder";
 import Sidebar from "./components/Sidebar";
@@ -14,7 +15,19 @@ import { useLauncher } from "./useLauncher";
 
 export default function App() {
   const [page, setPage] = useState<PageId>("play");
+  const [update, setUpdate] = useState<string | null>(null);
   const launcher = useLauncher();
+
+  useEffect(() => {
+    api
+      .releaseStatus()
+      .then((status) => {
+        if (status.update.kind === "available") setUpdate(status.update.version);
+      })
+      .catch(() => {
+        setUpdate(null);
+      });
+  }, []);
 
   let content;
   if (launcher.loadError && !launcher.overview) {
@@ -51,7 +64,7 @@ export default function App() {
     <div className={styles.shell}>
       <Titlebar />
       <div className={styles.body}>
-        <Sidebar current={page} onSelect={setPage} />
+        <Sidebar current={page} update={update} onSelect={setPage} />
         <main className={styles.main}>{content}</main>
       </div>
     </div>

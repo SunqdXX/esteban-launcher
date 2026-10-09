@@ -56,6 +56,7 @@ fn main() {
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
@@ -92,6 +93,8 @@ fn main() {
             commands::remove_skin,
             commands::set_skin,
             commands::release_status,
+            commands::install_update,
+            commands::restart_app,
         ])
         .run(tauri::generate_context!());
     if let Err(error) = result {

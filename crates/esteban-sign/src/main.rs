@@ -52,6 +52,33 @@ enum Command {
         file: PathBuf,
     },
     #[command(
+        about = "Sign launcher installers and write a signed latest.json for the updater, all next to the installers"
+    )]
+    Release {
+        #[arg(long, value_name = "FILE", help = "The updater secret key from keygen")]
+        key: PathBuf,
+        #[arg(long, value_name = "X.Y.Z", help = "The version these installers are")]
+        version: String,
+        #[arg(
+            long,
+            default_value = "",
+            help = "Short release notes shown in the launcher"
+        )]
+        notes: String,
+        #[arg(
+            long,
+            value_name = "URL",
+            help = "Where the files will be downloaded from (default: the launcher's GitHub release for this version)"
+        )]
+        base_url: Option<String>,
+        #[arg(
+            value_name = "FILE",
+            required = true,
+            help = "The AppImage, deb, setup.exe and msi from the release build"
+        )]
+        files: Vec<PathBuf>,
+    },
+    #[command(
         about = "Check a signed file against the keys built into the launcher, or a public key file"
     )]
     Verify {
@@ -275,6 +302,204 @@ fn sign(key: &Path, file: &Path) -> Reply<Signed> {
     })
 }
 
+fn base64_encode(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(char::from(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+fn platform_of(name: &str) -> Option<&'static str> {
+    if name.ends_with(".AppImage") {
+        Some("linux-x86_64-appimage")
+    } else if name.ends_with(".deb") {
+        Some("linux-x86_64-deb")
+    } else if name.ends_with("-setup.exe") {
+        Some("windows-x86_64-nsis")
+    } else if name.ends_with(".msi") {
+        Some("windows-x86_64-msi")
+    } else {
+        None
+    }
+}
+
+fn minisign_text(
+    secret: &SecretKey,
+    public: &PublicKey,
+    bytes: &[u8],
+    trusted_comment: &str,
+) -> Reply<String> {
+    Ok(minisign::sign(
+        Some(public),
+        secret,
+        Cursor::new(bytes),
+        Some(trusted_comment),
+        Some("signature from esteban-sign"),
+    )
+    .map_err(|e| format!("Signing failed: {e}"))?
+    .into_string())
+}
+
+fn write_replacing(path: &Path, bytes: &[u8]) -> Reply<()> {
+    let mut staging = path.as_os_str().to_owned();
+    staging.push(".part");
+    let staging = PathBuf::from(staging);
+    if staging.exists() {
+        fs::remove_file(&staging)
+            .map_err(|e| format!("Couldn't clear {}: {e}", staging.display()))?;
+    }
+    write_new(&staging, bytes, false)?;
+    fs::rename(&staging, path).map_err(|e| format!("Couldn't write {}: {e}", path.display()))
+}
+
+#[derive(Debug)]
+struct Released {
+    written: Vec<PathBuf>,
+    key_id: String,
+    built_in: bool,
+}
+
+fn release(
+    key: &Path,
+    version: &str,
+    notes: &str,
+    base_url: Option<&str>,
+    files: &[PathBuf],
+) -> Reply<Released> {
+    if esteban_core::system::parse_version(version).is_none_or(|n| n.len() != 3) {
+        return Err(format!("{version} isn't a version like 0.2.0."));
+    }
+    let base = base_url
+        .map(|b| b.trim_end_matches('/').to_string())
+        .unwrap_or_else(|| {
+            format!("https://github.com/SunqdXX/esteban-launcher/releases/download/v{version}")
+        });
+    let folder = files
+        .first()
+        .and_then(|f| f.parent())
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    let mut entries = serde_json::Map::new();
+    let mut items = Vec::new();
+    for file in files {
+        let name = file
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| format!("{} has no usable file name.", file.display()))?
+            .to_string();
+        let platform = platform_of(&name).ok_or_else(|| {
+            format!("{name} isn't an AppImage, deb, setup.exe or msi from the release build.")
+        })?;
+        if name.contains(char::is_whitespace) || !name.contains(version) {
+            return Err(format!(
+                "{name} should be named the way the release build names it, with {version} in it and no spaces."
+            ));
+        }
+        if file.parent().map(Path::to_path_buf).unwrap_or_default() != folder {
+            return Err("Put all the installers in one folder first.".into());
+        }
+        if entries.contains_key(platform) {
+            return Err(format!("Two files are for {platform}. Pass one of each."));
+        }
+        entries.insert(platform.to_string(), serde_json::Value::Null);
+        items.push((file.clone(), name, platform));
+    }
+    let secret = load_secret(key)?;
+    let public = PublicKey::from_secret_key(&secret)
+        .map_err(|e| format!("Couldn't read the public half of the key: {e}"))?;
+    let public_key = public.to_base64();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut written = Vec::new();
+    for (file, name, platform) in &items {
+        let bytes = fs::read(file).map_err(|e| format!("Couldn't read {}: {e}", file.display()))?;
+        let comment = format!("timestamp:{stamp}\tfile:{name}\tversion:{version}");
+        let text = minisign_text(&secret, &public, &bytes, &comment)?;
+        let encoded = base64_encode(text.as_bytes());
+        check_installer_signature(&public_key, &bytes, &encoded, version)?;
+        let sig_path = {
+            let mut p = file.as_os_str().to_owned();
+            p.push(".sig");
+            PathBuf::from(p)
+        };
+        write_replacing(&sig_path, encoded.as_bytes())?;
+        written.push(sig_path);
+        entries.insert(
+            (*platform).to_string(),
+            serde_json::json!({ "signature": encoded, "url": format!("{base}/{name}") }),
+        );
+    }
+    let manifest = serde_json::json!({
+        "version": version,
+        "notes": notes,
+        "pub_date": channel::utc_now(),
+        "platforms": entries,
+    });
+    let latest = serde_json::to_vec_pretty(&manifest)
+        .map_err(|e| format!("Couldn't write latest.json: {e}"))?;
+    update::parse(&latest).map_err(|e| format!("latest.json came out wrong: {e}"))?;
+    let latest_path = folder.join("latest.json");
+    let latest_comment = format!("esteban-launcher updater latest.json version:{version}");
+    let latest_signature = minisign_text(&secret, &public, &latest, &latest_comment)?;
+    let verified = signing::verify_with(
+        std::slice::from_ref(&public_key),
+        Purpose::Updater,
+        &latest,
+        &latest_signature,
+    )
+    .map_err(|e| format!("The latest.json signature didn't check out, nothing was written: {e}"))?;
+    write_replacing(&latest_path, &latest)?;
+    written.push(latest_path.clone());
+    let latest_sig_path = signature_path(&latest_path);
+    write_replacing(&latest_sig_path, latest_signature.as_bytes())?;
+    written.push(latest_sig_path);
+    Ok(Released {
+        written,
+        key_id: verified.key_id,
+        built_in: signing::built_in(Purpose::Updater).contains(&public_key),
+    })
+}
+
+fn check_installer_signature(
+    public_key: &str,
+    bytes: &[u8],
+    encoded: &str,
+    version: &str,
+) -> Reply<()> {
+    let text = esteban_core::signing::decode_base64_text(encoded)
+        .ok_or("The installer signature didn't encode properly.")?;
+    let verified = signing::verify_with(&[public_key.to_string()], Purpose::Updater, bytes, &text)
+        .map_err(|e| {
+            format!("An installer signature didn't check out, nothing was written: {e}")
+        })?;
+    let signed_version = verified
+        .trusted_comment
+        .split('\t')
+        .find_map(|field| field.strip_prefix("version:"));
+    if signed_version != Some(version) {
+        return Err(
+            "An installer signature doesn't carry the version, nothing was written.".into(),
+        );
+    }
+    Ok(())
+}
+
 fn verify(file: &Path, public: Option<&Path>) -> Reply<String> {
     let purpose = kind_of(file)?;
     let bytes = fs::read(file).map_err(|e| format!("Couldn't read {}: {e}", file.display()))?;
@@ -342,6 +567,25 @@ fn run(cli: Cli) -> Reply<()> {
                     "This key isn't in config/keys.json yet, so this build of the launcher won't trust it."
                 );
             }
+        }
+        Command::Release {
+            key,
+            version,
+            notes,
+            base_url,
+            files,
+        } => {
+            let done = release(&key, &version, &notes, base_url.as_deref(), &files)?;
+            println!("Signed with key {}. Wrote:", done.key_id);
+            for path in &done.written {
+                println!("  {}", path.display());
+            }
+            if !done.built_in {
+                println!(
+                    "This key isn't the updater key in config/keys.json, so the launcher won't install these."
+                );
+            }
+            println!("Upload every file listed above to the draft release, then publish it.");
         }
         Command::Verify { file, public } => {
             println!("{}", verify(&file, public.as_deref())?);
@@ -452,5 +696,125 @@ mod tests {
         fs::write(&other, "{}").unwrap();
         assert!(sign(&key, &other).is_err());
         assert!(sign(&dir.path().join("channel.pub"), &list).is_err());
+    }
+
+    #[test]
+    fn base64_matches_the_standard_alphabet_and_padding() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"a"), "YQ==");
+        assert_eq!(base64_encode(b"ab"), "YWI=");
+        assert_eq!(base64_encode(b"abc"), "YWJj");
+        assert_eq!(
+            base64_encode(b"any carnal pleas"),
+            "YW55IGNhcm5hbCBwbGVhcw=="
+        );
+        let text = "untrusted comment: x\nRWQ+/=\n";
+        assert_eq!(
+            esteban_core::signing::decode_base64_text(&base64_encode(text.as_bytes())).as_deref(),
+            Some(text)
+        );
+    }
+
+    fn installers(dir: &Path, version: &str) -> Vec<PathBuf> {
+        [
+            format!("esteban-launcher-{version}-linux-x86_64.AppImage"),
+            format!("esteban-launcher-{version}-linux-amd64.deb"),
+            format!("esteban-launcher-{version}-windows-x64-setup.exe"),
+            format!("esteban-launcher-{version}-windows-x64.msi"),
+        ]
+        .iter()
+        .map(|name| {
+            let path = dir.join(name);
+            fs::write(&path, format!("installer bytes for {name}")).unwrap();
+            path
+        })
+        .collect()
+    }
+
+    #[test]
+    fn a_release_is_signed_the_way_tauris_updater_checks_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = dir.path().join("updater.key");
+        let made = keygen(&key, Purpose::Updater, true).unwrap();
+        let out = dir.path().join("release");
+        fs::create_dir_all(&out).unwrap();
+        let files = installers(&out, "0.2.0");
+        let done = release(&key, "0.2.0", "Faster installs", None, &files).unwrap();
+        assert_eq!(done.written.len(), 6);
+        assert!(!done.built_in);
+
+        let tauri_pubkey = base64_encode(fs::read_to_string(&made.public).unwrap().as_bytes());
+        let pubkey_text = esteban_core::signing::decode_base64_text(&tauri_pubkey).unwrap();
+        let public = minisign_verify::PublicKey::decode(&pubkey_text).unwrap();
+        let latest = fs::read(out.join("latest.json")).unwrap();
+        let manifest = update::parse(&latest).unwrap();
+        assert_eq!(manifest.version, "0.2.0");
+        assert_eq!(manifest.platforms.len(), 4);
+        for file in &files {
+            let name = file.file_name().unwrap().to_str().unwrap();
+            let entry = manifest
+                .platforms
+                .values()
+                .find(|e| e.url.ends_with(name))
+                .unwrap();
+            assert_eq!(
+                entry.url,
+                format!(
+                    "https://github.com/SunqdXX/esteban-launcher/releases/download/v0.2.0/{name}"
+                )
+            );
+            let mut sig_name = file.as_os_str().to_owned();
+            sig_name.push(".sig");
+            assert_eq!(fs::read_to_string(sig_name).unwrap(), entry.signature);
+            let text = esteban_core::signing::decode_base64_text(&entry.signature).unwrap();
+            let signature = minisign_verify::Signature::decode(&text).unwrap();
+            public
+                .verify(&fs::read(file).unwrap(), &signature, true)
+                .unwrap();
+            assert!(
+                signature
+                    .trusted_comment()
+                    .split('\t')
+                    .any(|f| f == "version:0.2.0")
+            );
+            assert!(public.verify(b"tampered", &signature, true).is_err());
+        }
+        let latest_sig = fs::read_to_string(out.join("latest.json.minisig")).unwrap();
+        assert!(
+            signing::verify_with(
+                std::slice::from_ref(&made.public_key),
+                Purpose::Updater,
+                &latest,
+                &latest_sig
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn releases_with_wrong_names_versions_or_duplicates_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = dir.path().join("updater.key");
+        keygen(&key, Purpose::Updater, true).unwrap();
+        let files = installers(dir.path(), "0.2.0");
+        assert!(
+            release(&key, "0.3.0", "", None, &files)
+                .unwrap_err()
+                .contains("with 0.3.0 in it")
+        );
+        assert!(release(&key, "soon", "", None, &files).is_err());
+        let doubled = vec![files[0].clone(), files[0].clone()];
+        assert!(
+            release(&key, "0.2.0", "", None, &doubled)
+                .unwrap_err()
+                .contains("Two files")
+        );
+        let spaced = dir.path().join("Esteban Launcher_0.2.0_amd64.AppImage");
+        fs::write(&spaced, "x").unwrap();
+        assert!(release(&key, "0.2.0", "", None, &[spaced]).is_err());
+        let other = dir.path().join("esteban-launcher-0.2.0.zip");
+        fs::write(&other, "x").unwrap();
+        assert!(release(&key, "0.2.0", "", None, &[other]).is_err());
+        assert!(!dir.path().join("latest.json").exists());
     }
 }

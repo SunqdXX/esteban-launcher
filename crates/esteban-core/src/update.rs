@@ -10,7 +10,16 @@ use crate::{Error, Result, VERSION};
 pub const UPDATE_URL: &str =
     "https://github.com/SunqdXX/esteban-launcher/releases/latest/download/latest.json";
 
-const DOWNLOAD_PREFIX: &str = "https://github.com/SunqdXX/";
+pub const DOWNLOAD_PREFIX: &str = "https://github.com/SunqdXX/";
+
+pub const RELEASES_PAGE: &str = "https://github.com/SunqdXX/esteban-launcher/releases/latest";
+
+pub const PLATFORM_KEYS: &[&str] = &[
+    "linux-x86_64-appimage",
+    "linux-x86_64-deb",
+    "windows-x86_64-nsis",
+    "windows-x86_64-msi",
+];
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Manifest {
@@ -46,13 +55,28 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest> {
         return bad("lists no downloads".into());
     }
     for (platform, entry) in &manifest.platforms {
+        if !PLATFORM_KEYS.contains(&platform.as_str()) {
+            return bad(format!("lists an unknown platform {platform}"));
+        }
         if !entry.url.starts_with(DOWNLOAD_PREFIX) {
             return bad(format!(
                 "points {platform} somewhere other than the launcher's GitHub releases"
             ));
         }
+        if entry.signature.trim().is_empty() {
+            return bad(format!("has no signature for {platform}"));
+        }
     }
     Ok(manifest)
+}
+
+pub fn entry_matches(manifest: &Manifest, version: &str, url: &str, signature: &str) -> bool {
+    numbers(version).is_some()
+        && numbers(version) == numbers(&manifest.version)
+        && manifest
+            .platforms
+            .values()
+            .any(|entry| entry.url == url && entry.signature == signature)
 }
 
 pub fn is_newer(candidate: &str, current: &str) -> bool {
@@ -92,45 +116,54 @@ pub async fn check(net: &Net) -> UpdateCheck {
     .await
 }
 
-pub async fn check_with(net: &Net, url: &str, keys: &[String], current: &str) -> UpdateCheck {
-    if keys.is_empty() {
-        return UpdateCheck::NoKey;
-    }
+pub enum Fetched {
+    Verified(Box<Manifest>, String),
+    NothingPublished,
+    Offline,
+    Refused(String),
+}
+
+pub async fn fetch_verified(net: &Net, url: &str, keys: &[String]) -> Fetched {
     let bytes = match net.bytes(url).await {
         Ok(bytes) => bytes,
-        Err(Error::Status { status: 404, .. }) => return UpdateCheck::NothingPublished,
-        Err(_) => return UpdateCheck::Offline,
+        Err(Error::Status { status: 404, .. }) => return Fetched::NothingPublished,
+        Err(_) => return Fetched::Offline,
     };
     let signature = match net.bytes(&format!("{url}.minisig")).await {
         Ok(text) => String::from_utf8_lossy(&text).into_owned(),
         Err(Error::Status { status: 404, .. }) => String::new(),
-        Err(_) => return UpdateCheck::Offline,
+        Err(_) => return Fetched::Offline,
     };
     let verified = match signing::verify_with(keys, Purpose::Updater, &bytes, &signature) {
         Ok(verified) => verified,
-        Err(e) => {
-            return UpdateCheck::Refused {
-                reason: e.to_string(),
-            };
-        }
+        Err(e) => return Fetched::Refused(e.to_string()),
     };
-    let manifest = match parse(&bytes) {
-        Ok(manifest) => manifest,
-        Err(e) => {
-            return UpdateCheck::Refused {
-                reason: e.to_string(),
-            };
-        }
-    };
-    if is_newer(&manifest.version, current) {
-        UpdateCheck::Available {
-            version: manifest.version,
-            notes: manifest.notes,
-            key_id: verified.key_id,
-        }
-    } else {
-        UpdateCheck::UpToDate {
-            latest: manifest.version,
+    match parse(&bytes) {
+        Ok(manifest) => Fetched::Verified(Box::new(manifest), verified.key_id),
+        Err(e) => Fetched::Refused(e.to_string()),
+    }
+}
+
+pub async fn check_with(net: &Net, url: &str, keys: &[String], current: &str) -> UpdateCheck {
+    if keys.is_empty() {
+        return UpdateCheck::NoKey;
+    }
+    match fetch_verified(net, url, keys).await {
+        Fetched::NothingPublished => UpdateCheck::NothingPublished,
+        Fetched::Offline => UpdateCheck::Offline,
+        Fetched::Refused(reason) => UpdateCheck::Refused { reason },
+        Fetched::Verified(manifest, key_id) => {
+            if is_newer(&manifest.version, current) {
+                UpdateCheck::Available {
+                    version: manifest.version,
+                    notes: manifest.notes,
+                    key_id,
+                }
+            } else {
+                UpdateCheck::UpToDate {
+                    latest: manifest.version,
+                }
+            }
         }
     }
 }
@@ -145,7 +178,7 @@ mod tests {
     use crate::signing::tests::TestKey;
 
     const LATEST: &str = r#"{"version":"0.2.0","notes":"Faster installs","pub_date":"2026-11-01T00:00:00Z",
-        "platforms":{"linux-x86_64":{"url":"https://github.com/SunqdXX/esteban-launcher/releases/download/v0.2.0/esteban.AppImage","signature":"x"}}}"#;
+        "platforms":{"linux-x86_64-appimage":{"url":"https://github.com/SunqdXX/esteban-launcher/releases/download/v0.2.0/esteban.AppImage","signature":"c2ln"}}}"#;
 
     #[test]
     fn manifests_need_a_version_and_downloads_on_our_releases() {
@@ -154,6 +187,8 @@ mod tests {
             LATEST.replace("0.2.0\"", "soon\""),
             LATEST.replace("https://github.com/SunqdXX/", "https://evil.example/"),
             r#"{"version":"0.2.0","platforms":{}}"#.to_string(),
+            LATEST.replace("linux-x86_64-appimage", "linux-x86_64"),
+            LATEST.replace("\"signature\":\"c2ln\"", "\"signature\":\" \""),
         ];
         for text in bad {
             assert!(parse(text.as_bytes()).is_err(), "{text} was accepted");
@@ -161,6 +196,19 @@ mod tests {
         assert!(is_newer("0.2.0", "0.1.0") && is_newer("v1.0.0", "0.9.9"));
         assert!(!is_newer("0.1.0", "0.1.0") && !is_newer("0.0.9", "0.1.0"));
         assert!(!is_newer("x", "0.1.0"));
+        let manifest = parse(LATEST.as_bytes()).unwrap();
+        let url =
+            "https://github.com/SunqdXX/esteban-launcher/releases/download/v0.2.0/esteban.AppImage";
+        assert!(entry_matches(&manifest, "0.2.0", url, "c2ln"));
+        assert!(entry_matches(&manifest, "v0.2.0", url, "c2ln"));
+        assert!(!entry_matches(&manifest, "0.1.9", url, "c2ln"));
+        assert!(!entry_matches(&manifest, "0.2.0", url, "b3RoZXI="));
+        assert!(!entry_matches(
+            &manifest,
+            "0.2.0",
+            "https://github.com/SunqdXX/x",
+            "c2ln"
+        ));
     }
 
     async fn serve(body: &str, signature: Option<&str>) -> MockServer {

@@ -91,10 +91,22 @@ export type UpdateCheck =
   | { kind: "available"; version: string; notes: string; keyId: string }
   | { kind: "refused"; reason: string };
 
+export interface SelfUpdate {
+  package: string | null;
+  reason: string | null;
+}
+
 export interface ReleaseStatus {
   launcher: string;
   channel: ChannelReport;
   update: UpdateCheck;
+  selfUpdate: SelfUpdate;
+  releasesPage: string;
+}
+
+export interface UpdateProgress {
+  downloaded: number;
+  total: number | null;
 }
 
 export interface About {
@@ -214,11 +226,19 @@ export const api = {
   packs: (action: "link" | "import", from: string, s: Selection) => invoke<PackLine[]>("packs", { action, from, ...wire(s) }),
   about: () => invoke<About>("about"),
   releaseStatus: () => invoke<ReleaseStatus>("release_status"),
-  openLink: (which: "github" | "esteban" | "discord") => invoke<null>("open_link", { which }),
+  installUpdate: () => invoke<{ version: string; restart: boolean }>("install_update"),
+  restartApp: () => invoke<null>("restart_app"),
+  openLink: (which: "github" | "esteban" | "discord" | "releases") => invoke<null>("open_link", { which }),
 };
 
 export function gigabytes(mb: number): string {
   return `${(mb / 1024).toFixed(mb % 1024 === 0 ? 0 : 1)} GB`;
+}
+
+export function onUpdateProgress(handler: (p: UpdateProgress) => void): Promise<UnlistenFn> {
+  return listen<UpdateProgress>("update-progress", (event) => {
+    handler(event.payload);
+  });
 }
 
 export function onProgress(handler: (p: Progress) => void): Promise<UnlistenFn> {

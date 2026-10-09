@@ -31,9 +31,6 @@
 - [ ] App icon: right now it is the full logo on a square canvas of its own background color. Decide on a square cut of the logo for small icon sizes.
 - [x] BTC and XMR addresses and the Discord invite are in `config/donate.json`.
 - [ ] USDC address and its network. Until then About shows "Address not set yet" for USDC.
-- [ ] Run `esteban-sign keygen` for the channel and the updater key (commands in `docs/update-channel.md`), keep the secret keys offline, and hand over the two public key lines for `config/keys.json`.
-- [ ] Decide where launcher downloads live before the first public release (separate download repo). `latest.json` is read from the launcher repo's releases until then.
-
-## Later
-
-- [ ] Code-signing certificate for Windows installers (M7).
+- [x] Channel and updater keys made by the owner, public keys in `config/keys.json` (channel F06D6DD40133B8FC, updater 1B5726E0D3D4ECBE).
+- [ ] Decide where launcher downloads live before the first public release (separate download repo). The release workflow, the updater endpoint and `latest.json` use the launcher repo's releases until then.
+- [ ] Windows installers aren't code-signed, so SmartScreen warns on first run. A code-signing certificate fixes that.

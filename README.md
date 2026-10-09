@@ -37,9 +37,10 @@ sign in isnt built yet tho, it waits on mojang approving the app
 
 the list of esteban jars (`versions.json`) and the launcher update info (`latest.json`) are signed. the launcher only trusts them if the signature matches a public key built into it, the list isnt older than one it already saw, and it hasnt expired. how it works and how releases get signed: [docs/update-channel.md](docs/update-channel.md)
 
+the launcher updates itself from signed releases: About shows when a new version is out and installs it after checking the signature (AppImage, deb and the windows installer). how a release gets built and signed: [docs/release.md](docs/release.md)
+
 ## planned
 
-- installers and installing updates from inside the launcher
 - voluntary crypto donations, never needed for anything
 
 ## build

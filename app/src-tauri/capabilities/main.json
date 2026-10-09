@@ -40,6 +40,8 @@
     "allow-update-skin",
     "allow-remove-skin",
     "allow-set-skin",
-    "allow-release-status"
+    "allow-release-status",
+    "allow-install-update",
+    "allow-restart-app"
   ]
 }

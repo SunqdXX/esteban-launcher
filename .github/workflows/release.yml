@@ -1,0 +1,100 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - id: check
+        run: |
+          app=$(python3 -c "import json; print(json.load(open('app/src-tauri/tauri.conf.json'))['version'])")
+          crate=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])")
+          npm=$(python3 -c "import json; print(json.load(open('app/package.json'))['version'])")
+          if [ "$app" != "$crate" ] || [ "$app" != "$npm" ]; then
+            echo "versions differ: tauri.conf.json $app, Cargo.toml $crate, package.json $npm"
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$app" ]; then
+            echo "tag ${GITHUB_REF_NAME} doesn't match the app version $app"
+            exit 1
+          fi
+          echo "version=$app" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            bundles: appimage,deb
+          - os: windows-2022
+            bundles: nsis,msi
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev patchelf libfuse2 file
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+        working-directory: app
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      - run: npx tauri build --bundles ${{ matrix.bundles }}
+        working-directory: app
+      - shell: bash
+        run: |
+          v="${{ needs.version.outputs.version }}"
+          b=target/release/bundle
+          mkdir -p installers
+          if [ "${RUNNER_OS}" = "Linux" ]; then
+            cp "$b"/appimage/*.AppImage "installers/esteban-launcher-$v-linux-x86_64.AppImage"
+            cp "$b"/deb/*.deb "installers/esteban-launcher-$v-linux-amd64.deb"
+          else
+            cp "$b"/nsis/*-setup.exe "installers/esteban-launcher-$v-windows-x64-setup.exe"
+            cp "$b"/msi/*.msi "installers/esteban-launcher-$v-windows-x64.msi"
+          fi
+          ls -la installers
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: installers-${{ runner.os }}
+          path: installers/*
+          if-no-files-found: error
+
+  draft:
+    if: github.ref_type == 'tag'
+    needs: [version, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: installers-*
+          merge-multiple: true
+          path: installers
+      - working-directory: installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
+            --title "Esteban Launcher ${{ needs.version.outputs.version }}" \
+            --notes "Unsigned draft. Sign the installers with esteban-sign release, upload the .sig files, latest.json and latest.json.minisig, then publish." \
+            *

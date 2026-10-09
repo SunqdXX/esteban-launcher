@@ -28,6 +28,8 @@ fn main() {
         "remove_skin",
         "set_skin",
         "release_status",
+        "install_update",
+        "restart_app",
     ]);
     if let Err(error) =
         tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))

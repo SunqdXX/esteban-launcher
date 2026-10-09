@@ -29,17 +29,43 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src ipc: http://ipc.localhost ws://127.0.0.1:1420 http://127.0.0.1:1420; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       "freezePrototype": true,
-      "capabilities": ["main"]
+      "capabilities": [
+        "main"
+      ]
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["appimage", "deb", "msi", "nsis"],
+    "targets": [
+      "appimage",
+      "deb",
+      "msi",
+      "nsis"
+    ],
     "category": "Game",
     "shortDescription": "Fabric launcher with performance mods",
     "license": "GPL-3.0-only",
     "licenseFile": "../../LICENSE",
     "copyright": "Esteban Launcher contributors",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFCNTcyNkUwRDNENEVDQkUKUldTKzdOVFQ0Q1pYR3lEWVV0YmUwNUJiMHV6V21YSDhYSEVlM09wcFJGbnlEbVFnT2pDdDZvbjMK",
+      "endpoints": [
+        "https://github.com/SunqdXX/esteban-launcher/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true,
+      "allowDowngrades": false,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

@@ -189,3 +189,31 @@
   color: var(--text-dim);
   font-size: var(--text-sm);
 }
+
+.install {
+  margin: var(--space-3) 0;
+}
+
+.primary {
+  height: 36px;
+  padding: 0 var(--space-4);
+  font-weight: 600;
+  color: var(--on-venom);
+  background: var(--venom);
+}
+
+.primary:hover {
+  background: var(--green);
+}
+
+.track {
+  height: 6px;
+  max-width: 420px;
+  background: var(--surface-2);
+  border: var(--line) solid var(--border);
+}
+
+.fill {
+  height: 100%;
+  background: var(--venom);
+}

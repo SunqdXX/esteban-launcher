@@ -17,9 +17,10 @@ use esteban_core::update::{self, UpdateCheck};
 use esteban_core::versions::{DEFAULT_GAME_VERSION, GameVersion, PINNED_VERSIONS};
 use esteban_core::{java, system};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::Mutex;
 
 use crate::progress::UiProgress;
@@ -296,10 +297,37 @@ pub async fn instances(state: State<'_, AppState>) -> Reply<Vec<InstanceStatus>>
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SelfUpdate {
+    package: Option<&'static str>,
+    reason: Option<&'static str>,
+}
+
+fn self_update() -> SelfUpdate {
+    use tauri::utils::config::BundleType;
+    use tauri::utils::platform::bundle_type;
+    let package = match bundle_type() {
+        Some(BundleType::AppImage) => Some("AppImage"),
+        Some(BundleType::Deb) => Some("deb"),
+        Some(BundleType::Nsis) => Some("Windows installer"),
+        Some(BundleType::Msi) => Some("MSI"),
+        _ => None,
+    };
+    SelfUpdate {
+        package,
+        reason: package.is_none().then_some(
+            "This copy wasn't installed from a release package, so it can't update itself.",
+        ),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReleaseStatus {
     launcher: &'static str,
     channel: ChannelReport,
     update: UpdateCheck,
+    self_update: SelfUpdate,
+    releases_page: &'static str,
 }
 
 #[tauri::command]
@@ -312,7 +340,87 @@ pub async fn release_status(state: State<'_, AppState>) -> Reply<ReleaseStatus> 
         launcher: esteban_core::VERSION,
         channel,
         update,
+        self_update: self_update(),
+        releases_page: update::RELEASES_PAGE,
     })
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateProgress {
+    downloaded: u64,
+    total: Option<u64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Installed {
+    version: String,
+    restart: bool,
+}
+
+#[tauri::command]
+pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Reply<Installed> {
+    if let Some(reason) = self_update().reason {
+        return Err(reason.into());
+    }
+    let Ok(_busy) = state.busy.try_lock() else {
+        return Err("Wait for the install to finish first.".into());
+    };
+    let manifest = match update::fetch_verified(
+        &state.net,
+        update::UPDATE_URL,
+        esteban_core::signing::built_in(esteban_core::signing::Purpose::Updater),
+    )
+    .await
+    {
+        update::Fetched::Verified(manifest, _) => manifest,
+        update::Fetched::NothingPublished => return Err("No launcher update is published.".into()),
+        update::Fetched::Offline => return Err("Couldn't reach GitHub to get the update.".into()),
+        update::Fetched::Refused(reason) => return Err(reason),
+    };
+    let updater = app
+        .updater()
+        .map_err(|e| format!("The updater couldn't start: {e}"))?;
+    let found = updater
+        .check()
+        .await
+        .map_err(|e| format!("Couldn't check for the update: {e}"))?;
+    let Some(found) = found else {
+        return Err("Already on the newest version.".into());
+    };
+    if !update::entry_matches(
+        &manifest,
+        &found.version,
+        found.download_url.as_str(),
+        &found.signature,
+    ) {
+        return Err(
+            "The update GitHub offered doesn't match the signed update info, so it wasn't installed."
+                .into(),
+        );
+    }
+    let mut downloaded = 0u64;
+    let events = app.clone();
+    found
+        .download_and_install(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                let _ = events.emit("update-progress", UpdateProgress { downloaded, total });
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| format!("The update didn't install: {e}"))?;
+    Ok(Installed {
+        version: found.version,
+        restart: true,
+    })
+}
+
+#[tauri::command]
+pub fn restart_app(app: AppHandle) {
+    app.restart();
 }
 
 #[derive(Serialize)]
@@ -711,6 +819,7 @@ pub fn open_link(app: AppHandle, which: String) -> Reply<()> {
     let url = match which.as_str() {
         "github" => GITHUB.to_string(),
         "esteban" => ESTEBAN.to_string(),
+        "releases" => update::RELEASES_PAGE.to_string(),
         "discord"
             if config.discord.starts_with("https://discord.gg/")
                 || config.discord.starts_with("https://discord.com/invite/") =>
@@ -743,6 +852,21 @@ mod tests {
         assert!(empty.address.is_empty() && empty.qr.is_empty());
         let parsed: Donate = serde_json::from_str(DONATE).unwrap();
         assert!(parsed.discord.is_empty() || parsed.discord.starts_with("https://"));
+    }
+
+    #[test]
+    fn the_pinned_updater_key_and_endpoint_match_the_core() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let updater = &config["plugins"]["updater"];
+        let pubkey_file =
+            esteban_core::signing::decode_base64_text(updater["pubkey"].as_str().unwrap()).unwrap();
+        let line = pubkey_file.lines().nth(1).unwrap().trim();
+        let built_in = esteban_core::signing::built_in(esteban_core::signing::Purpose::Updater);
+        assert_eq!(built_in.first().map(String::as_str), Some(line));
+        assert_eq!(updater["endpoints"][0], update::UPDATE_URL);
+        assert_eq!(updater["requireSignedVersion"], true);
+        assert_eq!(updater["allowDowngrades"], false);
     }
 
     #[test]

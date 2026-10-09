@@ -17,7 +17,7 @@ Any failure is a hard stop for that file with a readable message. There is no "c
 
 ## Launcher updates
 
-`latest.json` (the Tauri updater format) and `latest.json.minisig` from the latest launcher release, signed with the updater key, a separate keypair from the channel key. The launcher checks the signature before it reads the version, and About shows the result. Downloading and installing an update comes with the installers (M7), where Tauri's updater checks each installer against the same key.
+`latest.json` (the Tauri updater format) and `latest.json.minisig` come from the latest launcher release, signed with the updater key, a separate keypair from the channel key. The launcher checks that signature before it reads the version. Installing goes through Tauri's updater with the same key pinned, and it only installs what the signed `latest.json` lists, at a version that is both newer and the one the installer's signature names. The full release steps are in [release.md](release.md).
 
 ## Signing (owner only)
 
@@ -37,7 +37,7 @@ Publishing a new Esteban version list:
 3. `cargo run --release -p esteban-sign -- verify config/versions.json` checks it against the keys built into this checkout.
 4. Upload `versions.json` and `versions.json.minisig` to the Esteban release on GitHub.
 
-`latest.json` is signed the same way with the updater key.
+`latest.json` and the installers are signed with `esteban-sign release`, see [release.md](release.md).
 
 ## Threat model
 

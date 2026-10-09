@@ -95,6 +95,10 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+pub fn decode_base64_text(text: &str) -> Option<String> {
+    String::from_utf8(base64_decode(text.trim())?).ok()
+}
+
 pub fn verify(purpose: Purpose, data: &[u8], signature: &str) -> Result<Verified> {
     verify_with(built_in(purpose), purpose, data, signature)
 }

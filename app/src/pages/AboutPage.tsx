@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, message, type About, type Coin, type ReleaseStatus, type UpdateCheck } from "../api";
+import { api, message, onUpdateProgress, type About, type Coin, type ReleaseStatus, type UpdateCheck } from "../api";
 import logoUrl from "../assets/logo/EstebanLogo.png";
 import styles from "./AboutPage.module.css";
 
@@ -88,10 +88,21 @@ function channelLine(status: ReleaseStatus): string {
   return `Esteban version list ${String(c.sequence)}: ${from}. Expires ${c.expires.slice(0, 10)}.`;
 }
 
+type Phase =
+  | { kind: "idle" }
+  | { kind: "installing"; downloaded: number; total: number | null }
+  | { kind: "installed"; version: string }
+  | { kind: "failed"; text: string };
+
+function megabytes(bytes: number): string {
+  return (bytes / 1_048_576).toFixed(1);
+}
+
 function Updates() {
   const [status, setStatus] = useState<ReleaseStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
+  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
 
   const load = () => {
     api
@@ -115,18 +126,109 @@ function Updates() {
 
   useEffect(load, []);
 
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    onUpdateProgress((p) => {
+      setPhase((current) => (current.kind === "installing" ? { kind: "installing", downloaded: p.downloaded, total: p.total } : current));
+    })
+      .then((unlisten) => {
+        if (cancelled) unlisten();
+        else stop = unlisten;
+      })
+      .catch((e: unknown) => {
+        setError(message(e));
+      });
+    return () => {
+      cancelled = true;
+      if (stop) stop();
+    };
+  }, []);
+
+  const install = () => {
+    setPhase({ kind: "installing", downloaded: 0, total: null });
+    api
+      .installUpdate()
+      .then((done) => {
+        setPhase({ kind: "installed", version: done.version });
+      })
+      .catch((e: unknown) => {
+        setPhase({ kind: "failed", text: message(e) });
+      });
+  };
+
   const line = status ? updateLine(status.update) : null;
+  const available = status?.update.kind === "available" ? status.update : null;
   return (
     <section className={styles.section}>
       <h2 className={styles.h2}>Updates</h2>
       <ul className={styles.facts}>
-        <li>{checking && !status ? "Checking" : line ? <span className={line.good ? undefined : styles.dim}>{line.text}</span> : null}</li>
+        <li>
+          Esteban Launcher {status?.launcher ?? ""}.{" "}
+          {checking && !status ? "Checking" : line ? <span className={line.good ? undefined : styles.dim}>{line.text}</span> : null}
+        </li>
         {status && <li>{channelLine(status)}</li>}
         {status?.channel.notice && <li className={styles.bad}>{status.channel.notice}</li>}
       </ul>
       {error && <p className={styles.bad}>{error}</p>}
-      <p className={styles.dim}>Both are checked against signing keys built into the launcher before anything in them is used.</p>
-      <button type="button" className={styles.link} disabled={checking} onClick={check}>
+      {available && status?.selfUpdate.package && (
+        <div className={styles.install}>
+          {phase.kind === "installing" ? (
+            <div role="status" aria-live="polite">
+              <div className={styles.track}>
+                <div
+                  className={styles.fill}
+                  style={{ width: phase.total ? `${String(Math.round((phase.downloaded / phase.total) * 100))}%` : "0%" }}
+                />
+              </div>
+              <p className={styles.dim}>
+                Downloading {megabytes(phase.downloaded)}
+                {phase.total ? ` of ${megabytes(phase.total)}` : ""} MB, then checking its signature
+              </p>
+            </div>
+          ) : phase.kind === "installed" ? (
+            <>
+              <p>{phase.version} is installed. Restart to use it.</p>
+              <button
+                type="button"
+                className={styles.primary}
+                onClick={() => {
+                  api.restartApp().catch((e: unknown) => {
+                    setError(message(e));
+                  });
+                }}
+              >
+                Restart now
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className={styles.primary} onClick={install}>
+                Download and install {available.version}
+              </button>
+              {phase.kind === "failed" && <p className={styles.bad}>{phase.text}</p>}
+            </>
+          )}
+        </div>
+      )}
+      {available && status && !status.selfUpdate.package && (
+        <div className={styles.install}>
+          <p className={styles.dim}>{status.selfUpdate.reason}</p>
+          <button
+            type="button"
+            className={styles.link}
+            onClick={() => {
+              api.openLink("releases").catch((e: unknown) => {
+                setError(message(e));
+              });
+            }}
+          >
+            Open the release page
+          </button>
+        </div>
+      )}
+      <p className={styles.dim}>Updates and the Esteban version list are only used after their signatures check out against keys built into the launcher.</p>
+      <button type="button" className={styles.link} disabled={checking || phase.kind === "installing"} onClick={check}>
         {checking ? "Checking" : "Check again"}
       </button>
     </section>

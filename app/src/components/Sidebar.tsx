@@ -4,10 +4,11 @@ import styles from "./Sidebar.module.css";
 
 interface SidebarProps {
   current: PageId;
+  update: string | null;
   onSelect: (page: PageId) => void;
 }
 
-export default function Sidebar({ current, onSelect }: SidebarProps) {
+export default function Sidebar({ current, update, onSelect }: SidebarProps) {
   return (
     <nav className={styles.sidebar} aria-label="Main">
       <div className={styles.brand}>
@@ -29,6 +30,18 @@ export default function Sidebar({ current, onSelect }: SidebarProps) {
           </li>
         ))}
       </ul>
+      {update && (
+        <button
+          type="button"
+          className={styles.update}
+          onClick={() => {
+            onSelect("about");
+          }}
+        >
+          <span className={styles.updateDot} />
+          Launcher {update} is out
+        </button>
+      )}
       <footer className={styles.footer}>
         <p className={styles.disclaimer}>{DISCLAIMER}</p>
       </footer>
