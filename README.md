@@ -53,6 +53,16 @@ npm ci
 npm run tauri dev
 ```
 
+a release binary without installers lands in `target/release/esteban-launcher`:
+
+```
+cd app
+npm ci
+npm run tauri build -- --no-bundle
+```
+
+plain `cargo build --release` works too, as long as `npm run build` ran in `app/` after the last frontend change (the build stops and says so otherwise)
+
 ## command line
 
 ```
