@@ -65,6 +65,17 @@ jobs:
 
   deny:
     runs-on: ubuntu-24.04
+    env:
+      DENY: cargo-deny-0.20.2-x86_64-unknown-linux-musl
+      DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
+        with:
+          toolchain: stable
+      - run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/deny.tar.gz" "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/$DENY.tar.gz"
+          echo "$DENY_SHA256  $RUNNER_TEMP/deny.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/deny.tar.gz" -C "$RUNNER_TEMP" "$DENY/cargo-deny"
+      - run: |
+          "$RUNNER_TEMP/$DENY/cargo-deny" --all-features --log-level warn check
