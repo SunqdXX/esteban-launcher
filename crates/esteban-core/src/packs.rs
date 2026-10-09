@@ -2,7 +2,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use crate::error::IoContext;
-use crate::profile::Instance;
+use crate::instance::Instance;
 use crate::{Error, Result, fsx};
 
 pub const PACK_FOLDERS: &[&str] = &["shaderpacks", "resourcepacks", "screenshots"];
@@ -204,8 +204,8 @@ async fn remove_link(dest: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loader::Loader;
     use crate::paths::Paths;
-    use crate::profile::ProfileKind;
 
     struct Setup {
         _dir: tempfile::TempDir,
@@ -226,7 +226,7 @@ mod tests {
         std::fs::create_dir_all(source.join("resourcepacks")).unwrap();
         std::fs::write(source.join("resourcepacks/pack.zip"), b"pack").unwrap();
         let paths = Paths::new(dir.path().join("base"));
-        let instance = Instance::new(&paths, ProfileKind::Clean, "1.21.4").unwrap();
+        let instance = Instance::new(&paths, "1.21.4", Loader::Fabric, false).unwrap();
         Setup {
             _dir: dir,
             source,

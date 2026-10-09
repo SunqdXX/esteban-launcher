@@ -101,7 +101,7 @@ pub fn build(
         .collect();
     let separator = platform.classpath_separator();
     vars.insert("auth_player_name", session.username.clone());
-    vars.insert("version_name", installed.fabric.id.clone());
+    vars.insert("version_name", installed.loader.version_name.clone());
     vars.insert(
         "game_directory",
         instance.dir.to_string_lossy().into_owned(),
@@ -111,6 +111,15 @@ pub fn build(
         installed.assets_root.to_string_lossy().into_owned(),
     );
     vars.insert("assets_index_name", installed.version.assets.clone());
+    vars.insert(
+        "game_assets",
+        installed.game_assets.to_string_lossy().into_owned(),
+    );
+    vars.insert(
+        "auth_session",
+        format!("token:{}:{}", session.access_token.expose(), session.uuid),
+    );
+    vars.insert("user_properties", "{}".to_string());
     vars.insert("auth_uuid", session.uuid.clone());
     vars.insert(
         "auth_access_token",
@@ -137,30 +146,27 @@ pub fn build(
         platform,
         features: &features,
     };
-    let arguments = installed.version.arguments.clone().unwrap_or_default();
+    let loader = &installed.loader;
     let max_heap = options.max_heap_mb.unwrap_or(installed.default_max_heap_mb);
 
     let mut out = super::jvm::default_flags(&installed.version, &ctx, max_heap);
     out.extend(options.extra_jvm_args.iter().cloned());
-    out.extend(args::expand(&arguments.jvm, &ctx, &vars));
-    out.extend(
-        installed
-            .fabric
-            .arguments
-            .jvm
-            .iter()
-            .map(|a| args::substitute(a, &vars)),
-    );
-    out.push(installed.fabric.main_class.clone());
-    out.extend(args::expand(&arguments.game, &ctx, &vars));
-    out.extend(
-        installed
-            .fabric
-            .arguments
-            .game
-            .iter()
-            .map(|a| args::substitute(a, &vars)),
-    );
+    match &installed.version.arguments {
+        Some(arguments) => out.extend(args::expand(&arguments.jvm, &ctx, &vars)),
+        None => out.extend(args::expand(&args::legacy_jvm(), &ctx, &vars)),
+    }
+    out.extend(args::expand(&loader.jvm, &ctx, &vars));
+    out.push(loader.main_class.clone());
+    let legacy_line = loader
+        .legacy_game
+        .as_ref()
+        .or(installed.version.minecraft_arguments.as_ref());
+    match (legacy_line, &installed.version.arguments) {
+        (Some(line), _) => out.extend(args::legacy_game(line, &vars)),
+        (None, Some(arguments)) => out.extend(args::expand(&arguments.game, &ctx, &vars)),
+        (None, None) => {}
+    }
+    out.extend(args::expand(&loader.game, &ctx, &vars));
 
     Ok(LaunchPlan {
         java: options

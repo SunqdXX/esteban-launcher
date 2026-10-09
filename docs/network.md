@@ -8,6 +8,7 @@ All requests are HTTPS, have timeouts, and send a fixed `User-Agent` that names 
 |---|---|
 | `piston-meta.mojang.com` | version manifest, version JSONs, asset indexes, Java runtime manifests |
 | `piston-data.mojang.com` | client jar, logging config, Java runtime files |
+| `launchermeta.mojang.com`, `launcher.mojang.com` | the same files for older releases (1.0 to 1.9.x), whose version files still point there |
 | `libraries.minecraft.net` | game libraries |
 | `resources.download.minecraft.net` | asset objects |
 | `meta.fabricmc.net` | Fabric loader versions and launch profiles |

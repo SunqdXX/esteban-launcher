@@ -2,7 +2,9 @@ use serde::Deserialize;
 
 use crate::download::Download;
 use crate::hash::Hash;
+use crate::loader::{LaunchProfile, Loader};
 use crate::mojang::libraries::{ResolvedLibrary, library_key, maven_path};
+use crate::mojang::version::Argument;
 use crate::net::Net;
 use crate::paths::Paths;
 use crate::{Error, Result};
@@ -125,6 +127,33 @@ pub async fn libraries(
         });
     }
     Ok(out)
+}
+
+pub fn launch_profile(
+    profile: FabricProfile,
+    loader_version: &str,
+    libraries: Vec<ResolvedLibrary>,
+) -> LaunchProfile {
+    LaunchProfile {
+        loader: Loader::Fabric,
+        loader_version: Some(loader_version.to_string()),
+        version_name: profile.id,
+        main_class: profile.main_class,
+        jvm: profile
+            .arguments
+            .jvm
+            .into_iter()
+            .map(Argument::Plain)
+            .collect(),
+        game: profile
+            .arguments
+            .game
+            .into_iter()
+            .map(Argument::Plain)
+            .collect(),
+        legacy_game: None,
+        libraries,
+    }
 }
 
 async fn sidecar_sha256(net: &Net, artifact_url: &str) -> Result<Hash> {

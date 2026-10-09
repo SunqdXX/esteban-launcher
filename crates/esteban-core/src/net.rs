@@ -16,6 +16,8 @@ pub const USER_AGENT: &str = concat!(
 pub const ALLOWED_HOSTS: &[&str] = &[
     "piston-meta.mojang.com",
     "piston-data.mojang.com",
+    "launchermeta.mojang.com",
+    "launcher.mojang.com",
     "libraries.minecraft.net",
     "resources.download.minecraft.net",
     "meta.fabricmc.net",

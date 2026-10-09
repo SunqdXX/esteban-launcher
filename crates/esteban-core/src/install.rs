@@ -7,20 +7,22 @@ use serde::Deserialize;
 use crate::download::{self, Download, Stats};
 use crate::error::IoContext;
 use crate::esteban;
-use crate::fabric::{self, FabricProfile};
+use crate::fabric;
 use crate::hash::Hash;
+use crate::instance::{Instance, InstanceFile, Jar};
 use crate::java::{self, JavaRuntime};
 use crate::launch::jvm;
-use crate::modcheck::{self, Environment, Jar};
+use crate::loader::{LaunchProfile, Loader};
+use crate::modcheck::{self, Environment, Jar as CheckedJar};
 use crate::modrinth::lock::Skipped;
 use crate::modrinth::{self, DEFAULT_MODS, ModLock, Modrinth, ResolvedMod, Unavailable};
 use crate::mojang::manifest::VersionManifest;
 use crate::mojang::rules::Context;
 use crate::mojang::version::VersionJson;
-use crate::mojang::{assets, libraries};
+use crate::mojang::{assets, libraries, natives};
 use crate::net::Net;
 use crate::paths::Paths;
-use crate::profile::{HACKS_WARNING, Instance, NEW_INSTANCE_OPTIONS, ProfileKind, Settings};
+use crate::profile::{HACKS_WARNING, NEW_INSTANCE_OPTIONS, Settings};
 use crate::progress::Progress;
 use crate::system::{self, Platform};
 use crate::{Error, Result, fsx};
@@ -36,11 +38,11 @@ pub struct Installed {
     pub instance: Instance,
     pub platform: Platform,
     pub version: VersionJson,
-    pub fabric: FabricProfile,
-    pub loader_version: String,
+    pub loader: LaunchProfile,
     pub classpath: Vec<PathBuf>,
     pub java: JavaRuntime,
     pub assets_root: PathBuf,
+    pub game_assets: PathBuf,
     pub libraries_root: PathBuf,
     pub mods: Vec<ResolvedMod>,
     pub extras: Vec<String>,
@@ -51,21 +53,28 @@ pub struct Installed {
     pub stats: Stats,
 }
 
+impl Installed {
+    pub fn loader_label(&self) -> String {
+        match &self.loader.loader_version {
+            Some(version) => format!("{} {version}", self.loader.loader.title()),
+            None => self.loader.loader.title().to_string(),
+        }
+    }
+}
+
 pub async fn install(
     net: &Net,
     paths: &Paths,
-    kind: ProfileKind,
-    game_version: &str,
+    instance: &Instance,
     options: InstallOptions,
     progress: &dyn Progress,
 ) -> Result<Installed> {
-    if kind == ProfileKind::Hacks && !Settings::load(paths).await?.hacks_warning_accepted {
+    if instance.hacked && !Settings::load(paths).await?.hacks_warning_accepted {
         return Err(Error::Guard(format!(
-            "The hacks profile has not been accepted yet. {HACKS_WARNING}"
+            "Hacked has not been accepted yet. {HACKS_WARNING}"
         )));
     }
     let platform = Platform::current()?;
-    let instance = Instance::new(paths, kind, game_version)?;
     let game = instance.game_version.clone();
     let features = BTreeSet::new();
     let ctx = Context {
@@ -80,11 +89,6 @@ pub async fn install(
     let (version, raw): (VersionJson, _) = net
         .verified_json(&entry.url, "the version file", &Hash::sha1(&entry.sha1))
         .await?;
-    if version.minecraft_arguments.is_some() || version.arguments.is_none() {
-        return Err(Error::Unsupported(format!(
-            "{game} uses the old launch format, which this launcher does not support"
-        )));
-    }
     let version_dir = paths.version_dir(fabric::token(&version.id)?);
     fsx::write_atomic(&version_dir.join(format!("{}.json", version.id)), &raw).await?;
 
@@ -121,30 +125,47 @@ pub async fn install(
                 }
             }
             None => {
-                tracing::warn!(jar = %client_jar.display(), "the client jar has no data version, leaving options.txt to the game");
+                tracing::debug!(jar = %client_jar.display(), "the client jar has no data version, leaving options.txt to the game");
             }
         }
     }
 
-    instance.ensure_custom_backgrounds().await?;
-
-    let mut meta = instance.read_meta().await?;
-    let loader_version = match (&meta.loader_version, options.update) {
-        (Some(pinned), false) => pinned.clone(),
-        _ => fabric::latest_stable_loader(net, &game).await?,
+    let mut file = instance.read_file().await?;
+    let loader = match instance.loader {
+        Loader::Vanilla => LaunchProfile::vanilla(&version),
+        Loader::Fabric => {
+            instance.ensure_custom_backgrounds().await?;
+            let loader_version = match (&file.loader.version, file.loader.pinned, options.update) {
+                (Some(chosen), true, _) | (Some(chosen), false, false) => chosen.clone(),
+                _ => fabric::latest_stable_loader(net, &game).await?,
+            };
+            let profile = fabric::profile(net, &game, &loader_version).await?;
+            let resolved = fabric::libraries(net, paths, &profile).await?;
+            fabric::launch_profile(profile, &loader_version, resolved)
+        }
+        Loader::Forge => {
+            return Err(Error::Unsupported(
+                "Forge instances can't be installed by this build yet.".into(),
+            ));
+        }
     };
-    let fabric_profile = fabric::profile(net, &game, &loader_version).await?;
-    let fabric_libraries = fabric::libraries(net, paths, &fabric_profile).await?;
-    let fabric_keys: HashSet<&str> = fabric_libraries.iter().map(|l| l.key.as_str()).collect();
-    let vanilla_libraries: Vec<_> = libraries::resolve(&version.libraries, paths, &ctx)?
+
+    let loader_keys: HashSet<&str> = loader.libraries.iter().map(|l| l.key.as_str()).collect();
+    let vanilla = libraries::resolve(&version.libraries, paths, &ctx)?;
+    let vanilla_libraries: Vec<_> = vanilla
+        .classpath
         .into_iter()
-        .filter(|l| !fabric_keys.contains(l.key.as_str()))
+        .filter(|l| !loader_keys.contains(l.key.as_str()))
         .collect();
-    let all_libraries = fabric_libraries.iter().chain(&vanilla_libraries);
+    let all_libraries = loader.libraries.iter().chain(&vanilla_libraries);
     stats.add(
         download::ensure_all(
             net,
-            all_libraries.clone().map(|l| l.download.clone()).collect(),
+            all_libraries
+                .clone()
+                .map(|l| l.download.clone())
+                .chain(vanilla.natives.iter().map(|n| n.download.clone()))
+                .collect(),
             16,
             progress,
             "libraries",
@@ -154,7 +175,9 @@ pub async fn install(
     let mut classpath: Vec<PathBuf> = all_libraries.map(|l| l.path.clone()).collect();
     classpath.push(client_jar);
 
-    stats.add(assets::ensure(net, paths, &version.asset_index, progress).await?);
+    let (asset_stats, game_assets) =
+        assets::ensure(net, paths, &version.asset_index, &instance.dir, progress).await?;
+    stats.add(asset_stats);
 
     let (java, java_stats) = java::ensure(
         net,
@@ -166,17 +189,105 @@ pub async fn install(
     .await?;
     stats.add(java_stats);
 
-    fsx::create_dir(&instance.mods_dir()).await?;
-    fsx::create_dir(&instance.natives_dir()).await?;
+    if vanilla.natives.is_empty() {
+        fsx::create_dir(&instance.natives_dir()).await?;
+    } else {
+        natives::extract(&vanilla.natives, &instance.natives_dir()).await?;
+    }
 
-    let disabled: Vec<String> = meta.disabled.iter().cloned().collect();
+    let mods = if instance.loader == Loader::Fabric {
+        let env = Environment {
+            game: game.clone(),
+            java_major: java
+                .version
+                .split(['.', '+', '-'])
+                .next()
+                .unwrap_or_default()
+                .to_string(),
+            loader: loader.loader_version.clone().unwrap_or_default(),
+        };
+        fabric_mods(net, instance, &file, &env, options, progress).await?
+    } else {
+        ModsOutcome::default()
+    };
+    if instance.loader.has_mods() {
+        fsx::create_dir(&instance.mods_dir()).await?;
+    }
+
+    file.loader.version.clone_from(&loader.loader_version);
+    file.installed = true;
+    file.jars = mods
+        .mods
+        .iter()
+        .map(Jar::from_mod)
+        .chain(
+            mods.extras
+                .iter()
+                .filter_map(|name| esteban::by_filename(name))
+                .map(|a| Jar::from_artifact(&a)),
+        )
+        .collect();
+    file.skipped = mods
+        .unavailable
+        .iter()
+        .map(|u| Skipped {
+            title: u.title.clone(),
+            message: u.message.clone(),
+        })
+        .collect();
+    file.resolved_without.clone_from(&mods.disabled);
+    instance.write_file(&file).await?;
+    let unmanaged = instance.unmanaged_jars(file.lock().as_ref()).await?;
+
+    instance.guard().await?;
+
+    let (_, default_max_heap_mb) = jvm::heap_mb(system::total_memory_bytes());
+    Ok(Installed {
+        instance: instance.clone(),
+        platform,
+        version,
+        loader,
+        classpath,
+        java,
+        assets_root: paths.assets(),
+        game_assets,
+        libraries_root: paths.libraries(),
+        mods: mods.mods,
+        extras: mods.extras,
+        unavailable: mods.unavailable,
+        disabled: mods.disabled,
+        unmanaged,
+        default_max_heap_mb,
+        stats,
+    })
+}
+
+#[derive(Default)]
+struct ModsOutcome {
+    mods: Vec<ResolvedMod>,
+    extras: Vec<String>,
+    unavailable: Vec<Unavailable>,
+    disabled: Vec<String>,
+}
+
+async fn fabric_mods(
+    net: &Net,
+    instance: &Instance,
+    file: &InstanceFile,
+    env: &Environment,
+    options: InstallOptions,
+    progress: &dyn Progress,
+) -> Result<ModsOutcome> {
+    let game = env.game.as_str();
+    fsx::create_dir(&instance.mods_dir()).await?;
+    let disabled: Vec<String> = file.disabled.iter().cloned().collect();
     let wanted: Vec<&str> = DEFAULT_MODS
         .iter()
         .map(|m| m.slug)
-        .filter(|slug| !meta.disabled.contains(*slug))
+        .filter(|slug| !file.disabled.contains(*slug))
         .collect();
     let off: Vec<&str> = disabled.iter().map(String::as_str).collect();
-    let previous = instance.read_lock().await?;
+    let previous = file.lock();
     let same_choice = |lock: &&ModLock| lock.game_version == game && lock.disabled == disabled;
     let reuse = previous
         .as_ref()
@@ -186,7 +297,7 @@ pub async fn install(
         Some(lock) => from_lock(lock),
         None => {
             progress.notice("looking up mods on Modrinth");
-            let looked_up = modrinth::resolve(&Modrinth::new(net), &wanted, &off, &game).await;
+            let looked_up = modrinth::resolve(&Modrinth::new(net), &wanted, &off, game).await;
             settle(looked_up, previous.as_ref().filter(same_choice), progress)?
         }
     };
@@ -206,30 +317,20 @@ pub async fn install(
         });
     }
     let artifacts = instance.extra_artifacts();
-    if esteban::hud_for(&game).is_none() {
+    if esteban::hud_for(game).is_none() && crate::versions::is_pinned(game) {
         progress.notice(&format!(
             "The Esteban HUD isn't published for {game} yet, so it's missing."
         ));
     }
-    if kind == ProfileKind::Hacks && esteban::hacks_for(&game).is_none() {
+    if instance.hacked && esteban::hacks_for(game).is_none() {
         progress.notice(&format!(
             "Esteban isn't published for {game} yet, so the hacks mod is missing."
         ));
     }
     let mut extra_names: Vec<String> = artifacts.iter().map(|a| a.filename.to_string()).collect();
     mod_downloads.extend(instance.extra_downloads());
-    stats.add(download::ensure_all(net, mod_downloads, 8, progress, "mods").await?);
+    download::ensure_all(net, mod_downloads, 8, progress, "mods").await?;
 
-    let env = Environment {
-        game: game.clone(),
-        java_major: java
-            .version
-            .split(['.', '+', '-'])
-            .next()
-            .unwrap_or_default()
-            .to_string(),
-        loader: loader_version.clone(),
-    };
     let managed: Vec<(String, String, String)> = mods
         .iter()
         .map(|m| (m.filename.clone(), m.title.clone(), m.slug.clone()))
@@ -245,12 +346,12 @@ pub async fn install(
     let mut unreadable = false;
     for (file, title, _) in &managed {
         match modcheck::read(&mods_dir.join(jar_name(file)?), title).await? {
-            Jar::Mod(info) => infos.push(*info),
-            Jar::Plain => {}
-            Jar::Unreadable => unreadable = true,
+            CheckedJar::Mod(info) => infos.push(*info),
+            CheckedJar::Plain => {}
+            CheckedJar::Unreadable => unreadable = true,
         }
     }
-    for problem in modcheck::check(&infos, &env, unreadable) {
+    for problem in modcheck::check(&infos, env, unreadable) {
         let path = mods_dir.join(jar_name(&problem.file)?);
         if let Err(e) = tokio::fs::remove_file(&path).await
             && e.kind() != std::io::ErrorKind::NotFound
@@ -272,21 +373,12 @@ pub async fn install(
         });
     }
 
-    let lock = ModLock {
-        game_version: game.clone(),
-        mods: mods.clone(),
-        extras: extra_names.clone(),
-        skipped: unavailable
-            .iter()
-            .map(|u| Skipped {
-                title: u.title.clone(),
-                message: u.message.clone(),
-            })
-            .collect(),
-        disabled: disabled.clone(),
-    };
     if let Some(previous) = &previous {
-        let keep: HashSet<&str> = lock.filenames().collect();
+        let keep: HashSet<&str> = mods
+            .iter()
+            .map(|m| m.filename.as_str())
+            .chain(extra_names.iter().map(String::as_str))
+            .collect();
         for old in previous.filenames().filter(|name| !keep.contains(name)) {
             let path = mods_dir.join(jar_name(old)?);
             if let Err(e) = tokio::fs::remove_file(&path).await
@@ -296,31 +388,11 @@ pub async fn install(
             }
         }
     }
-    lock.write(&instance.lock_path()).await?;
-    let unmanaged = instance.unmanaged_jars(Some(&lock)).await?;
-    meta.loader_version = Some(loader_version.clone());
-    instance.write_meta(&meta).await?;
-
-    instance.guard().await?;
-
-    let (_, default_max_heap_mb) = jvm::heap_mb(system::total_memory_bytes());
-    Ok(Installed {
-        instance,
-        platform,
-        version,
-        fabric: fabric_profile,
-        loader_version,
-        classpath,
-        java,
-        assets_root: paths.assets(),
-        libraries_root: paths.libraries(),
+    Ok(ModsOutcome {
         mods,
         extras: extra_names,
         unavailable,
         disabled,
-        unmanaged,
-        default_max_heap_mb,
-        stats,
     })
 }
 
@@ -494,11 +566,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::new(dir.path());
         let net = Net::launcher().unwrap();
+        let instance = Instance::new(&paths, "1.21.4", Loader::Fabric, true).unwrap();
         let result = install(
             &net,
             &paths,
-            ProfileKind::Hacks,
-            "1.21.4",
+            &instance,
             InstallOptions::default(),
             &crate::progress::Silent,
         )

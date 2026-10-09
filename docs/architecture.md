@@ -7,32 +7,34 @@ esteban-core  <-  esteban-cli
               <-  app/src-tauri  <-  app/src (React)
 ```
 
-- `crates/esteban-core`: all launcher logic. Manifests, downloads, Java runtimes, Fabric, Modrinth, the signed channel, auth, profiles, launching. No UI code, no printing.
+- `crates/esteban-core`: all launcher logic. Manifests, downloads, Java runtimes, Fabric, Modrinth, the signed channel, auth, instances, launching. No UI code, no printing.
 - `crates/esteban-cli`: a thin console front end. Anything the GUI can do, the CLI can do. It is how launching gets tested without a window.
 - `app/src-tauri`: a thin Tauri shell exposing typed commands over `esteban-core`. Capabilities are least-privilege, CSP is strict, nothing is loaded remotely.
 - `app/src`: React + TypeScript. Plain CSS with tokens in `styles/tokens.css`, CSS modules per component, fonts bundled locally.
 
-Profiles:
+Instances:
 
-- `clean` gets Fabric, the performance mods and the HUD mod. The hacks artifact cannot be added to it, and a pre-launch guard refuses to start if one is found in its `mods/`.
-- `hacks` is opt-in and gets everything in `clean` plus the hacks mod.
+- One per game version, loader (Vanilla, Fabric, Forge) and Hacked flag, each in its own folder: `fabric-1.21.4`, `fabric-1.21.4-hacked`, `vanilla-1.8.9`. Folders from before loaders existed (`clean-<v>`, `hacks-<v>`) are renamed once on start, unless the new name is already taken.
+- Vanilla gets no mods. Fabric gets the performance mods, plus the HUD mod on the Esteban versions.
+- Hacked is opt-in, only exists for the Esteban versions on Fabric, and adds the hacks mod. Every other instance is guarded: the hacks artifact cannot be added, and a pre-launch check refuses to start if one is found in its `mods/`.
+- `instance.json` (schema 2) holds the version, loader, loader version, Hacked flag, mod toggles and every managed jar with its hash. Older `instance.json` plus `mods.lock.json` pairs are read and converted, and the old lock goes on the next write.
 
 ## Install and launch
 
 `esteban_core::install::install` does everything a launch needs, in order:
 
 1. Version manifest, then the version JSON, checked against the sha1 the manifest lists.
-2. Client jar, libraries (Fabric's win when both list the same artifact), assets, and the Java runtime named by `javaVersion.component`.
+2. Client jar, libraries (the loader's win when both list the same artifact), assets, and the Java runtime named by `javaVersion.component`. Versions before 1.19 also get their native libraries unpacked into the instance's `natives/` (honoring `extract.exclude`, refusing any path that would leave the folder). Versions before 1.7.3 get their assets copied into the old layouts they read (`assets/virtual/legacy/`, or the instance's `resources/` before 1.6).
 3. A brand-new instance (no `options.txt` yet) gets `guiScale:3`, written after a `version:` line with the data version read from the client jar's `version.json`. Without that line the game treats the file as very old and runs every options upgrade on it, and one of those turns off Mojang's accessibility screen for new players. An existing `options.txt` is never touched.
-4. Mods from Modrinth (releases only, sha512 checked), plus the hacks jar for hacks profiles only. Picks are written to `mods.lock.json` so a re-run is reproducible. `--update` or a changed mod toggle resolves again. See [Mods](#mods).
-5. The clean-profile guard. It opens every jar in `mods/`, including jars nested inside jars, and refuses if the hacks mod is anywhere.
+4. Fabric only: mods from Modrinth (releases only, sha512 checked), plus the hacks jar for Hacked only. Picks are written to `instance.json` so a re-run is reproducible. `--update` or a changed mod toggle resolves again. See [Mods](#mods).
+5. The guard for every instance that isn't Hacked. It opens every jar in `mods/`, including jars nested inside jars, and refuses if the hacks mod is anywhere.
 
 Every download goes to a `.part` file, is checked against its hash and size, and is only then renamed into place. Existing files are re-hashed on each run, so a corrupted file is caught and fetched again.
 
-Launching builds the argument list from the version JSON's rules, adds Fabric's arguments, and starts Java from the bundled runtime.
+Launching builds the argument list from the version JSON's rules, adds the loader's arguments, and starts Java from the bundled runtime. Versions before 1.13 use the old one-line `minecraftArguments` with Mojang's classic JVM flags.
 
 - **Memory:** heap size comes from system RAM.
-- **GC:** on 26.x the GC flags come from Mojang's own `default-user-jvm` block. On 1.21.4 they are G1 with Mojang's tuning.
+- **GC:** on 26.x the GC flags come from Mojang's own `default-user-jvm` block. On everything older they are G1 with Mojang's tuning.
 - **Logging:** the game uses its built-in log4j config. Mojang's separate logging file switches the console to XML events for the official launcher's viewer, which plain-text log streaming does not want.
 - **Brand:** `-Dminecraft.launcher.brand=esteban-launcher`. Nothing pretends to be another client.
 
@@ -52,7 +54,7 @@ Resolving, in order:
    - If any jar's metadata can't be read, missing-dependency checks are switched off for that run, so nothing is skipped by mistake.
    - With `breaks`, the target is skipped, unless the target is Fabric API.
 
-Every skipped mod gets one plain sentence, printed during install and stored in `mods.lock.json`, so it shows up again in `mods list`. If Modrinth can't be reached, the last lock for the same game version and toggles is kept, with a notice. With no lock to fall back on, install stops with a plain message.
+Every skipped mod gets one plain sentence, printed during install and stored in `instance.json`, so it shows up again in `mods list`. If Modrinth can't be reached, the last lock for the same game version and toggles is kept, with a notice. With no lock to fall back on, install stops with a plain message.
 
 Jars the launcher did not put in `mods/` are left alone and listed as "added by you, not checked".
 
@@ -60,7 +62,7 @@ Jars the launcher did not put in `mods/` are left alone and listed as "added by 
 
 `esteban-cli packs link --from <game folder>` points an instance's `shaderpacks/`, `resourcepacks/` and `screenshots/` at the same folders in another game folder, for example `~/.minecraft` from Lunar or the vanilla launcher. Nothing is copied. It is a symlink on Linux and a directory junction on Windows, so it needs no admin rights.
 
-- `mods/` is never linked, so another launcher's mods can never reach the clean profile.
+- `mods/` is never linked, so another launcher's mods can never reach a guarded instance.
 - A missing folder or an empty one in the instance is replaced by the link. A folder with files in it is left alone, and the command says to use import instead.
 - An existing link is moved to the new source. Only the link changes, never the folder it pointed at.
 - A source inside the instance itself is refused.

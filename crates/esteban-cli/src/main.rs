@@ -7,12 +7,14 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand};
 use esteban_core::account::{Secret, Session};
 use esteban_core::install::{InstallOptions, Installed, install};
+use esteban_core::instance::Instance;
 use esteban_core::launch::{self, QuickPlay, Smoke};
+use esteban_core::loader::Loader;
 use esteban_core::modrinth::DEFAULT_MODS;
 use esteban_core::net::Net;
 use esteban_core::packs::{self, Imported, Linked};
 use esteban_core::paths::Paths;
-use esteban_core::profile::{HACKS_WARNING, Instance, ProfileKind, Settings};
+use esteban_core::profile::{HACKS_WARNING, Settings};
 use esteban_core::{DISCLAIMER, Error};
 
 use crate::progress::CliProgress;
@@ -35,20 +37,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    #[command(about = "Download and verify everything a profile needs")]
+    #[command(about = "Download and verify everything an instance needs")]
     Install(Target),
     #[command(about = "Install if needed, then start the game")]
     Launch(LaunchArgs),
     #[command(about = "Print the exact command a launch would run, with tokens hidden")]
     Plan(LaunchArgs),
-    #[command(subcommand, about = "See or change which mods a profile uses")]
+    #[command(subcommand, about = "See or change which mods an instance uses")]
     Mods(ModsCommand),
     #[command(
         subcommand,
         about = "Use shader packs, resource packs and screenshots from another game folder"
     )]
     Packs(PacksCommand),
-    #[command(about = "Print the folder of a profile")]
+    #[command(about = "Print the folder of an instance")]
     Path(Selector),
 }
 
@@ -76,7 +78,7 @@ struct PackSource {
 
 #[derive(Subcommand)]
 enum ModsCommand {
-    #[command(about = "Show the mods of a profile and why any were skipped")]
+    #[command(about = "Show the mods of an instance and why any were skipped")]
     List(Selector),
     #[command(about = "Turn a mod back on, then install")]
     Enable(Toggle),
@@ -92,8 +94,24 @@ struct Selector {
         help = "Game version, for example 1.21.4"
     )]
     game_version: String,
-    #[arg(long, default_value = "clean", value_parser = parse_profile, help = "clean or hacks")]
-    profile: ProfileKind,
+    #[arg(long, default_value = "fabric", value_parser = parse_loader, help = "vanilla, fabric or forge")]
+    loader: Loader,
+    #[arg(
+        long,
+        help = "The Hacked instance (only the Esteban versions on Fabric)"
+    )]
+    hacked: bool,
+}
+
+impl Selector {
+    fn instance(&self, paths: &Paths) -> Result<Instance, Failure> {
+        Ok(Instance::new(
+            paths,
+            &self.game_version,
+            self.loader,
+            self.hacked,
+        )?)
+    }
 }
 
 #[derive(Args, Clone)]
@@ -109,15 +127,9 @@ struct Toggle {
 
 #[derive(Args, Clone)]
 struct Target {
-    #[arg(
-        long = "version",
-        value_name = "VERSION",
-        help = "Game version, for example 1.21.4"
-    )]
-    game_version: String,
-    #[arg(long, default_value = "clean", value_parser = parse_profile, help = "clean or hacks")]
-    profile: ProfileKind,
-    #[arg(long, help = "Pick up newer Fabric and mod versions")]
+    #[command(flatten)]
+    selector: Selector,
+    #[arg(long, help = "Pick up newer loader and mod versions")]
     update: bool,
     #[arg(long, help = "Confirm the hacks warning (only needed once)")]
     accept_hacks: bool,
@@ -148,9 +160,16 @@ struct LaunchArgs {
         help = "Stop once the main menu is reached, fail if it takes longer"
     )]
     smoke_test: Option<u64>,
+    #[arg(
+        long,
+        value_name = "TEXT",
+        requires = "smoke_test",
+        help = "Log line that means the menu is up (default: Sound engine started)"
+    )]
+    smoke_marker: Vec<String>,
 }
 
-fn parse_profile(value: &str) -> Result<ProfileKind, String> {
+fn parse_loader(value: &str) -> Result<Loader, String> {
     value.parse().map_err(|e: Error| e.to_string())
 }
 
@@ -212,7 +231,7 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         Command::Packs(PacksCommand::Link(source)) => link_packs(&paths, &source).await,
         Command::Packs(PacksCommand::Import(source)) => import_packs(&paths, &source).await,
         Command::Path(selector) => {
-            let instance = Instance::new(&paths, selector.profile, &selector.game_version)?;
+            let instance = selector.instance(&paths)?;
             println!("{}", instance.dir.display());
             if !instance.dir.exists() {
                 eprintln!("not installed yet");
@@ -223,11 +242,7 @@ async fn run(cli: Cli) -> Result<(), Failure> {
 }
 
 async fn link_packs(paths: &Paths, source: &PackSource) -> Result<(), Failure> {
-    let instance = Instance::new(
-        paths,
-        source.selector.profile,
-        &source.selector.game_version,
-    )?;
+    let instance = source.selector.instance(paths)?;
     let mut refused = false;
     for (name, outcome) in packs::link(&instance, &source.from).await? {
         match outcome {
@@ -257,11 +272,7 @@ async fn link_packs(paths: &Paths, source: &PackSource) -> Result<(), Failure> {
 }
 
 async fn import_packs(paths: &Paths, source: &PackSource) -> Result<(), Failure> {
-    let instance = Instance::new(
-        paths,
-        source.selector.profile,
-        &source.selector.game_version,
-    )?;
+    let instance = source.selector.instance(paths)?;
     for (name, outcome) in packs::import(&instance, &source.from).await? {
         match outcome {
             Imported::Copied {
@@ -288,16 +299,16 @@ async fn import_packs(paths: &Paths, source: &PackSource) -> Result<(), Failure>
 }
 
 async fn list_mods(paths: &Paths, selector: &Selector) -> Result<(), Failure> {
-    let instance = Instance::new(paths, selector.profile, &selector.game_version)?;
-    let Some(lock) = instance.read_lock().await? else {
+    let instance = selector.instance(paths)?;
+    let file = instance.read_file().await?;
+    let Some(lock) = file.lock() else {
         eprintln!(
-            "{} {} is not installed yet. Run install first.",
-            selector.profile, selector.game_version
+            "{} is not installed yet. Run install first.",
+            instance.label()
         );
         return Ok(());
     };
-    let meta = instance.read_meta().await?;
-    println!("{} {}", instance.kind, instance.game_version);
+    println!("{}", instance.label());
     let width = lock.mods.iter().map(|m| m.title.len()).max().unwrap_or(0);
     for m in &lock.mods {
         let note = if DEFAULT_MODS
@@ -318,7 +329,7 @@ async fn list_mods(paths: &Paths, selector: &Selector) -> Result<(), Failure> {
         };
         println!("  on    {extra}  {what}");
     }
-    for slug in &meta.disabled {
+    for slug in &file.disabled {
         let title = DEFAULT_MODS
             .iter()
             .find(|d| d.slug == slug)
@@ -349,13 +360,12 @@ async fn toggle_mod(
     enabled: bool,
 ) -> Result<(), Failure> {
     let target = &toggle.target;
-    let instance = Instance::new(paths, target.profile, &target.game_version)?;
+    let instance = target.selector.instance(paths)?;
     let title = instance.set_mod_enabled(&toggle.name, enabled).await?;
     eprintln!(
-        "{title} is {} for {} {}.",
+        "{title} is {} for {}.",
         if enabled { "on" } else { "off" },
-        target.profile,
-        target.game_version
+        instance.label()
     );
     let installed = prepare(net, paths, target, &[]).await?;
     summarize(&installed);
@@ -370,11 +380,12 @@ async fn prepare(
     target: &Target,
     first_run_options: &'static [(&'static str, &'static str)],
 ) -> Result<Installed, Failure> {
-    if target.profile == ProfileKind::Hacks {
+    let instance = target.selector.instance(paths)?;
+    if instance.hacked {
         let mut settings = Settings::load(paths).await?;
         if !settings.hacks_warning_accepted {
             if !target.accept_hacks {
-                eprintln!("Esteban + Hacks adds the hacks mod on top of the clean profile.");
+                eprintln!("Hacked adds the hacks mod on top of the normal Fabric instance.");
                 eprintln!("{HACKS_WARNING}");
                 eprintln!(
                     "Run the same command again with --accept-hacks to confirm. You only do this once."
@@ -389,8 +400,7 @@ async fn prepare(
     let installed = install(
         net,
         paths,
-        target.profile,
-        &target.game_version,
+        &instance,
         InstallOptions {
             update: target.update,
             first_run_options,
@@ -405,10 +415,9 @@ async fn prepare(
 fn summarize(installed: &Installed) {
     let stats = installed.stats;
     eprintln!(
-        "{} {} ready: Fabric {}, Java {}, {} mods{}",
-        installed.instance.kind,
-        installed.instance.game_version,
-        installed.loader_version,
+        "{} ready: {}, Java {}, {} mods{}",
+        installed.instance.label(),
+        installed.loader_label(),
         installed.java.version,
         installed.mods.len() + installed.extras.len(),
         if stats.fetched_files == 0 {
@@ -486,8 +495,13 @@ async fn launch(net: &Net, paths: &Paths, args: LaunchArgs, dry_run: bool) -> Re
         return Ok(());
     }
 
+    let markers = if args.smoke_marker.is_empty() {
+        vec!["Sound engine started".to_string()]
+    } else {
+        args.smoke_marker.clone()
+    };
     let smoke = args.smoke_test.map(|seconds| Smoke {
-        markers: vec!["Sound engine started".to_string()],
+        markers,
         timeout: Duration::from_secs(seconds),
         settle: Duration::from_secs(15),
     });

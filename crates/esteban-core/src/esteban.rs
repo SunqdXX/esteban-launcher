@@ -31,6 +31,12 @@ impl Artifact {
             ArtifactKind::Hud => HUD_MOD_ID,
         }
     }
+
+    pub fn version(&self) -> &'static str {
+        let stem = self.filename.trim_end_matches(".jar");
+        let before_mc = stem.split('+').next().unwrap_or(stem);
+        before_mc.rsplit('-').next().unwrap_or(before_mc)
+    }
 }
 
 const PINNED: &[Artifact] = &[
@@ -139,6 +145,10 @@ pub fn hud_for(game_version: &str) -> Option<Artifact> {
     find(ArtifactKind::Hud, game_version)
 }
 
+pub fn by_filename(filename: &str) -> Option<Artifact> {
+    PINNED.iter().copied().find(|a| a.filename == filename)
+}
+
 pub fn is_known_hacks_jar(sha256: &str) -> bool {
     PINNED
         .iter()
@@ -162,6 +172,9 @@ mod tests {
             assert!(hacks.url.ends_with(hacks.filename) && hud.url.ends_with(hud.filename));
             assert_eq!(hacks.sha256.len(), 64);
             assert_eq!(hud.sha256.len(), 64);
+            assert_eq!(hacks.version(), "1.4.0");
+            assert_eq!(hud.version(), "1.4.0");
+            assert_eq!(by_filename(hud.filename), Some(hud));
         }
     }
 

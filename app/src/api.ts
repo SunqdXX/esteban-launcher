@@ -3,9 +3,21 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type Profile = "clean" | "hacks";
 
+export type Loader = "vanilla" | "fabric" | "forge";
+
 export interface GameVersion {
   id: string;
   tag: string;
+}
+
+interface OverviewWire {
+  versions: GameVersion[];
+  gameVersion: string;
+  loader: Loader;
+  hacked: boolean;
+  hacksWarningAccepted: boolean;
+  hacksWarning: string;
+  disclaimer: string;
 }
 
 export interface Overview {
@@ -66,6 +78,20 @@ export interface ModRow {
   skipped: string | null;
 }
 
+interface StatusWire {
+  loader: Loader;
+  hacked: boolean;
+  gameVersion: string;
+  installed: boolean;
+  loaderVersion: string | null;
+  loaderPinned: boolean;
+  skin: string | null;
+  mods: ModRow[];
+  extras: ExtraJar[];
+  unmanaged: string[];
+  folder: string;
+}
+
 export interface InstanceStatus {
   profile: Profile;
   gameVersion: string;
@@ -101,15 +127,41 @@ export interface Selection {
   profile: Profile;
 }
 
+const wire = (s: Selection) => ({
+  selection: { gameVersion: s.gameVersion, loader: "fabric" as Loader, hacked: s.profile === "hacks" },
+});
+
+const profileOf = (hacked: boolean): Profile => (hacked ? "hacks" : "clean");
+
+const fromStatus = (w: StatusWire): InstanceStatus => ({
+  profile: profileOf(w.hacked),
+  gameVersion: w.gameVersion,
+  installed: w.installed,
+  loaderVersion: w.loaderVersion,
+  mods: w.mods,
+  extras: w.extras,
+  unmanaged: w.unmanaged,
+  folder: w.folder,
+});
+
+const fromOverview = (w: OverviewWire): Overview => ({
+  versions: w.versions,
+  gameVersion: w.gameVersion,
+  profile: profileOf(w.hacked),
+  hacksWarningAccepted: w.hacksWarningAccepted,
+  hacksWarning: w.hacksWarning,
+  disclaimer: w.disclaimer,
+});
+
 export const api = {
-  overview: () => invoke<Overview>("overview"),
-  select: (s: Selection) => invoke<null>("select", { gameVersion: s.gameVersion, profile: s.profile }),
+  overview: () => invoke<OverviewWire>("overview").then(fromOverview),
+  select: (s: Selection) => invoke<null>("select", wire(s)),
   acceptHacksWarning: () => invoke<null>("accept_hacks_warning"),
-  status: (s: Selection) => invoke<InstanceStatus>("instance_status", { gameVersion: s.gameVersion, profile: s.profile }),
+  status: (s: Selection) => invoke<StatusWire>("instance_status", wire(s)).then(fromStatus),
   setMod: (s: Selection, slug: string, enabled: boolean) =>
-    invoke<InstanceStatus>("set_mod", { gameVersion: s.gameVersion, profile: s.profile, slug, enabled }),
-  install: (s: Selection) => invoke<InstallSummary>("install", { gameVersion: s.gameVersion, profile: s.profile }),
-  openFolder: (s: Selection) => invoke<null>("open_folder", { gameVersion: s.gameVersion, profile: s.profile }),
+    invoke<StatusWire>("set_mod", { ...wire(s), slug, enabled }).then(fromStatus),
+  install: (s: Selection) => invoke<InstallSummary>("install", wire(s)),
+  openFolder: (s: Selection) => invoke<null>("open_folder", wire(s)),
   settings: () => invoke<LauncherSettings>("launcher_settings"),
   setMemory: (memoryMb: number | null) => invoke<null>("set_memory", { memoryMb }),
   setJvmArgs: (text: string) => invoke<string>("set_jvm_args", { text }),
@@ -119,7 +171,7 @@ export const api = {
   pickJava: () => invoke<string | null>("pick_java"),
   setDataDir: (path: string | null) => invoke<string>("set_data_dir", { path }),
   packs: (action: "link" | "import", from: string, s: Selection) =>
-    invoke<PackLine[]>("packs", { action, from, gameVersion: s.gameVersion, profile: s.profile }),
+    invoke<PackLine[]>("packs", { action, from, ...wire(s) }),
   about: () => invoke<About>("about"),
   openLink: (which: "github" | "esteban" | "discord") => invoke<null>("open_link", { which }),
 };

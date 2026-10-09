@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 
 use super::rules::Rule;
@@ -96,9 +98,15 @@ pub struct Library {
     #[serde(default)]
     pub rules: Vec<Rule>,
     #[serde(default)]
-    pub natives: Option<serde_json::Value>,
+    pub natives: Option<BTreeMap<String, String>>,
     #[serde(default)]
-    pub extract: Option<serde_json::Value>,
+    pub extract: Option<Extract>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Extract {
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -106,7 +114,7 @@ pub struct LibraryDownloads {
     #[serde(default)]
     pub artifact: Option<Artifact>,
     #[serde(default)]
-    pub classifiers: Option<serde_json::Value>,
+    pub classifiers: Option<BTreeMap<String, Artifact>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

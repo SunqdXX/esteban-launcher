@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use super::rules::{self, Context};
-use super::version::Library;
+use super::version::{Artifact, Library};
 use crate::download::Download;
 use crate::hash::Hash;
 use crate::paths::Paths;
+use crate::system::{Arch, Platform};
 use crate::{Error, Result};
 
 #[derive(Clone, Debug)]
@@ -14,45 +16,85 @@ pub struct ResolvedLibrary {
     pub download: Download,
 }
 
-pub fn resolve(
-    libraries: &[Library],
-    paths: &Paths,
-    ctx: &Context<'_>,
-) -> Result<Vec<ResolvedLibrary>> {
-    let mut out = Vec::new();
+#[derive(Clone, Debug)]
+pub struct NativeJar {
+    pub path: PathBuf,
+    pub download: Download,
+    pub exclude: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Resolved {
+    pub classpath: Vec<ResolvedLibrary>,
+    pub natives: Vec<NativeJar>,
+}
+
+pub fn resolve(libraries: &[Library], paths: &Paths, ctx: &Context<'_>) -> Result<Resolved> {
+    let mut out = Resolved::default();
     for library in libraries {
         if !rules::allowed(&library.rules, ctx) {
             continue;
         }
-        let legacy_natives = library.natives.is_some()
-            || library.extract.is_some()
-            || library
+        if let Some(natives) = &library.natives
+            && let Some(classifier) = native_classifier(natives, ctx.platform)
+        {
+            let artifact = library
                 .downloads
                 .as_ref()
-                .is_some_and(|d| d.classifiers.is_some());
-        if legacy_natives {
-            return Err(Error::Unsupported(format!(
-                "{} uses the legacy natives layout, which only very old versions need",
-                library.name
-            )));
+                .and_then(|d| d.classifiers.as_ref())
+                .and_then(|c| c.get(&classifier));
+            match artifact {
+                Some(artifact) => {
+                    let path = paths.libraries().join(&artifact.path);
+                    out.natives.push(NativeJar {
+                        path: path.clone(),
+                        download: download_of(artifact, path),
+                        exclude: library
+                            .extract
+                            .as_ref()
+                            .map(|e| e.exclude.clone())
+                            .unwrap_or_default(),
+                    });
+                }
+                None => tracing::warn!(
+                    library = %library.name,
+                    %classifier,
+                    "the version file lists natives without a download for this system"
+                ),
+            }
         }
         let Some(artifact) = library.downloads.as_ref().and_then(|d| d.artifact.as_ref()) else {
             continue;
         };
         let path = paths.libraries().join(&artifact.path);
-        out.push(ResolvedLibrary {
+        out.classpath.push(ResolvedLibrary {
             key: library_key(&library.name)?,
             path: path.clone(),
-            download: Download {
-                url: artifact.url.clone(),
-                dest: path,
-                hash: Hash::sha1(&artifact.sha1),
-                size: Some(artifact.size),
-                executable: false,
-            },
+            download: download_of(artifact, path),
         });
     }
     Ok(out)
+}
+
+fn download_of(artifact: &Artifact, dest: PathBuf) -> Download {
+    Download {
+        url: artifact.url.clone(),
+        dest,
+        hash: Hash::sha1(&artifact.sha1),
+        size: Some(artifact.size),
+        executable: false,
+    }
+}
+
+fn native_classifier(natives: &BTreeMap<String, String>, platform: &Platform) -> Option<String> {
+    let bits = if platform.arch == Arch::X86 {
+        "32"
+    } else {
+        "64"
+    };
+    natives
+        .get(platform.mojang_os())
+        .map(|c| c.replace("${arch}", bits))
 }
 
 pub struct Coordinate<'a> {
@@ -139,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn natives_follow_os_rules_and_legacy_layout_is_refused() {
+    fn natives_follow_os_rules() {
         let linux = Platform {
             os: OsName::Linux,
             arch: Arch::X86_64,
@@ -163,18 +205,71 @@ mod tests {
             ),
         ];
         let resolved = resolve(&libs, &paths, &ctx).unwrap();
-        let keys: Vec<&str> = resolved.iter().map(|r| r.key.as_str()).collect();
+        let keys: Vec<&str> = resolved.classpath.iter().map(|r| r.key.as_str()).collect();
         assert_eq!(
             keys,
             vec!["org.lwjgl:lwjgl", "org.lwjgl:lwjgl:natives-linux"]
         );
+        assert!(resolved.natives.is_empty());
+    }
 
-        let legacy = vec![lib(
-            r#"{"name":"a:b:1","natives":{"linux":"natives-linux"}}"#,
-        )];
-        assert!(matches!(
-            resolve(&legacy, &paths, &ctx),
-            Err(Error::Unsupported(_))
-        ));
+    #[test]
+    fn classifier_natives_are_picked_per_os_and_arch() {
+        let features = BTreeSet::new();
+        let paths = Paths::new("/base");
+        let lwjgl = lib(
+            r#"{"name":"org.lwjgl.lwjgl:lwjgl-platform:2.9.4-nightly-20150209",
+                "natives":{"linux":"natives-linux","windows":"natives-windows-${arch}","osx":"natives-osx"},
+                "extract":{"exclude":["META-INF/"]},
+                "downloads":{"classifiers":{
+                    "natives-linux":{"path":"p/l.jar","sha1":"11","size":1,"url":"https://libraries.minecraft.net/l.jar"},
+                    "natives-windows-64":{"path":"p/w64.jar","sha1":"22","size":1,"url":"https://libraries.minecraft.net/w64.jar"},
+                    "natives-windows-32":{"path":"p/w32.jar","sha1":"33","size":1,"url":"https://libraries.minecraft.net/w32.jar"}}}}"#,
+        );
+        let twitch = lib(
+            r#"{"name":"tv.twitch:twitch-platform:6.5","natives":{"windows":"natives-windows-${arch}"},
+                "downloads":{"classifiers":{"natives-windows-64":{"path":"t.jar","sha1":"44","size":1,"url":"https://libraries.minecraft.net/t.jar"}}}}"#,
+        );
+        let both = lib(
+            r#"{"name":"org.lwjgl:lwjgl:3.2.2","natives":{"linux":"natives-linux"},
+                "downloads":{"artifact":{"path":"a.jar","sha1":"55","size":1,"url":"https://libraries.minecraft.net/a.jar"},
+                "classifiers":{"natives-linux":{"path":"n.jar","sha1":"66","size":1,"url":"https://libraries.minecraft.net/n.jar"}}}}"#,
+        );
+        let libs = vec![lwjgl, twitch, both];
+        let on = |os, arch| {
+            let platform = Platform {
+                os,
+                arch,
+                os_version: None,
+            };
+            let ctx = Context {
+                platform: &platform,
+                features: &features,
+            };
+            resolve(&libs, &paths, &ctx).unwrap()
+        };
+        let linux = on(OsName::Linux, Arch::X86_64);
+        let natives: Vec<_> = linux
+            .natives
+            .iter()
+            .map(|n| n.download.url.as_str())
+            .collect();
+        assert_eq!(
+            natives,
+            vec![
+                "https://libraries.minecraft.net/l.jar",
+                "https://libraries.minecraft.net/n.jar"
+            ]
+        );
+        assert_eq!(linux.natives[0].exclude, vec!["META-INF/".to_string()]);
+        assert_eq!(linux.classpath.len(), 1);
+        assert_eq!(linux.classpath[0].key, "org.lwjgl:lwjgl");
+        let windows = on(OsName::Windows, Arch::X86_64);
+        assert_eq!(windows.natives.len(), 2);
+        assert!(windows.natives[0].path.ends_with("p/w64.jar"));
+        assert!(windows.natives[1].path.ends_with("t.jar"));
+        let windows32 = on(OsName::Windows, Arch::X86);
+        assert!(windows32.natives[0].path.ends_with("p/w32.jar"));
+        assert_eq!(windows32.natives.len(), 1);
     }
 }

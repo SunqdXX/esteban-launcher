@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::Result;
+use crate::instance::Instance;
+use crate::loader::Loader;
 use crate::modrinth::DEFAULT_MODS;
-use crate::profile::{Instance, ProfileKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,10 +47,13 @@ impl ExtraJar {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstanceStatus {
-    pub profile: ProfileKind,
+    pub loader: Loader,
+    pub hacked: bool,
     pub game_version: String,
     pub installed: bool,
     pub loader_version: Option<String>,
+    pub loader_pinned: bool,
+    pub skin: Option<String>,
     pub mods: Vec<ModRow>,
     pub extras: Vec<ExtraJar>,
     pub unmanaged: Vec<String>,
@@ -57,10 +61,15 @@ pub struct InstanceStatus {
 }
 
 pub async fn status(instance: &Instance) -> Result<InstanceStatus> {
-    let lock = instance.read_lock().await?;
-    let meta = instance.read_meta().await?;
-    let mut mods = Vec::with_capacity(DEFAULT_MODS.len());
-    for known in DEFAULT_MODS {
+    let file = instance.read_file().await?;
+    let lock = file.lock();
+    let defaults: &[crate::modrinth::DefaultMod] = if instance.loader == Loader::Fabric {
+        DEFAULT_MODS
+    } else {
+        &[]
+    };
+    let mut mods = Vec::with_capacity(defaults.len());
+    for known in defaults {
         let resolved = lock.as_ref().and_then(|l| {
             l.mods
                 .iter()
@@ -76,7 +85,7 @@ pub async fn status(instance: &Instance) -> Result<InstanceStatus> {
             slug: known.slug.to_string(),
             title: known.title.to_string(),
             version: resolved.map(|m| m.version_number.clone()),
-            wanted: known.required || !meta.disabled.contains(known.slug),
+            wanted: known.required || !file.disabled.contains(known.slug),
             installed: resolved.is_some(),
             required: known.required,
             managed: true,
@@ -85,7 +94,7 @@ pub async fn status(instance: &Instance) -> Result<InstanceStatus> {
     }
     if let Some(lock) = &lock {
         for m in &lock.mods {
-            if DEFAULT_MODS
+            if defaults
                 .iter()
                 .any(|d| d.slug == m.slug || d.title == m.title)
             {
@@ -105,10 +114,13 @@ pub async fn status(instance: &Instance) -> Result<InstanceStatus> {
     }
     let unmanaged = instance.unmanaged_jars(lock.as_ref()).await?;
     Ok(InstanceStatus {
-        profile: instance.kind,
+        loader: instance.loader,
+        hacked: instance.hacked,
         game_version: instance.game_version.clone(),
         installed: lock.is_some(),
-        loader_version: meta.loader_version,
+        loader_version: file.loader.version.clone(),
+        loader_pinned: file.loader.pinned,
+        skin: file.skin.clone(),
         mods,
         extras: lock
             .map(|l| l.extras.iter().map(|f| ExtraJar::from_file(f)).collect())
@@ -121,10 +133,10 @@ pub async fn status(instance: &Instance) -> Result<InstanceStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::instance::InstanceFile;
     use crate::modrinth::lock::{ModLock, Skipped};
     use crate::modrinth::resolve::ResolvedMod;
     use crate::paths::Paths;
-    use crate::profile::InstanceMeta;
 
     fn resolved(slug: &str, title: &str, version: &str) -> ResolvedMod {
         ResolvedMod {
@@ -144,7 +156,8 @@ mod tests {
     #[tokio::test]
     async fn a_missing_instance_lists_every_default_mod_as_wanted() {
         let dir = tempfile::tempdir().unwrap();
-        let instance = Instance::new(&Paths::new(dir.path()), ProfileKind::Clean, "26.3").unwrap();
+        let instance =
+            Instance::new(&Paths::new(dir.path()), "26.3", Loader::Fabric, false).unwrap();
         let s = status(&instance).await.unwrap();
         assert!(!s.installed);
         assert_eq!(s.mods.len(), DEFAULT_MODS.len());
@@ -155,7 +168,8 @@ mod tests {
     #[tokio::test]
     async fn rows_show_versions_toggles_skips_and_extra_jars() {
         let dir = tempfile::tempdir().unwrap();
-        let instance = Instance::new(&Paths::new(dir.path()), ProfileKind::Hacks, "26.1").unwrap();
+        let instance =
+            Instance::new(&Paths::new(dir.path()), "26.1", Loader::Fabric, true).unwrap();
         std::fs::create_dir_all(instance.mods_dir()).unwrap();
         let lock = ModLock {
             game_version: "26.1".into(),
@@ -175,14 +189,14 @@ mod tests {
             }],
             disabled: vec!["lithium".into()],
         };
-        lock.write(&instance.lock_path()).await.unwrap();
-        let meta = InstanceMeta {
-            loader_version: Some("0.19.3".into()),
-            disabled: ["lithium".to_string(), "fabric-api".to_string()]
-                .into_iter()
-                .collect(),
-        };
-        instance.write_meta(&meta).await.unwrap();
+        lock.write(&instance.legacy_lock_path()).await.unwrap();
+        std::fs::write(
+            instance.meta_path(),
+            br#"{"loader_version":"0.19.3","disabled":["lithium","fabric-api"]}"#,
+        )
+        .unwrap();
+        let converted: InstanceFile = instance.read_file().await.unwrap();
+        assert!(converted.installed);
         std::fs::write(instance.mods_dir().join("mine.jar"), b"jar").unwrap();
         std::fs::write(instance.mods_dir().join("sodium-0.8.9.jar"), b"jar").unwrap();
 
@@ -207,5 +221,17 @@ mod tests {
         assert!(!s.extras[0].hacks && s.extras[0].title == "Esteban HUD");
         assert!(s.extras[1].hacks && s.extras[1].file == "esteban-1.4.0+26.1.jar");
         assert_eq!(s.unmanaged, vec!["mine.jar".to_string()]);
+        assert!(s.hacked && s.loader == Loader::Fabric && !s.loader_pinned);
+    }
+
+    #[tokio::test]
+    async fn vanilla_and_forge_list_no_performance_mods() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        for (version, loader) in [("1.8.9", Loader::Vanilla), ("1.20.1", Loader::Forge)] {
+            let instance = Instance::new(&paths, version, loader, false).unwrap();
+            let s = status(&instance).await.unwrap();
+            assert!(s.mods.is_empty() && !s.installed && s.loader == loader);
+        }
     }
 }

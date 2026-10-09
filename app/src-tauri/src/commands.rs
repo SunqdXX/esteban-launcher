@@ -2,13 +2,15 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 
 use esteban_core::install::{InstallOptions, install as install_instance};
+use esteban_core::instance::Instance;
 use esteban_core::launch::jvm;
+use esteban_core::loader::Loader;
 use esteban_core::net::Net;
 use esteban_core::packs::{self, Imported, Linked};
 use esteban_core::paths::Paths;
-use esteban_core::profile::{HACKS_WARNING, Instance, ProfileKind, Settings};
+use esteban_core::profile::{HACKS_WARNING, Settings};
 use esteban_core::status::{InstanceStatus, status};
-use esteban_core::versions::{DEFAULT_GAME_VERSION, GAME_VERSIONS, GameVersion, is_supported};
+use esteban_core::versions::{DEFAULT_GAME_VERSION, GameVersion, PINNED_VERSIONS};
 use esteban_core::{java, system};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -47,12 +49,21 @@ fn human(error: esteban_core::Error) -> String {
     error.to_string()
 }
 
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Selection {
+    game_version: String,
+    loader: Loader,
+    hacked: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Overview {
     versions: &'static [GameVersion],
     game_version: String,
-    profile: ProfileKind,
+    loader: Loader,
+    hacked: bool,
     hacks_warning_accepted: bool,
     hacks_warning: &'static str,
     disclaimer: &'static str,
@@ -69,13 +80,14 @@ pub struct InstallSummary {
     skipped: Vec<String>,
 }
 
-fn instance(state: &AppState, game_version: &str, profile: ProfileKind) -> Reply<Instance> {
-    if !is_supported(game_version) {
-        return Err(format!(
-            "{game_version} isn't one of the versions this launcher supports."
-        ));
-    }
-    Instance::new(&state.paths(), profile, game_version).map_err(human)
+fn instance(state: &AppState, selection: &Selection) -> Reply<Instance> {
+    Instance::new(
+        &state.paths(),
+        &selection.game_version,
+        selection.loader,
+        selection.hacked,
+    )
+    .map_err(human)
 }
 
 async fn load_settings(state: &AppState) -> Reply<Settings> {
@@ -91,16 +103,16 @@ pub async fn overview(state: State<'_, AppState>) -> Reply<Overview> {
     let settings = load_settings(&state).await?;
     let game_version = settings
         .game_version
-        .filter(|v| is_supported(v))
         .unwrap_or_else(|| DEFAULT_GAME_VERSION.to_string());
-    let profile = match settings.profile {
-        Some(ProfileKind::Hacks) if settings.hacks_warning_accepted => ProfileKind::Hacks,
-        _ => ProfileKind::Clean,
-    };
+    let loader = settings.loader.unwrap_or(Loader::Fabric);
+    let hacked = settings.hacked
+        && settings.hacks_warning_accepted
+        && esteban_core::instance::hacked_allowed(&game_version, loader);
     Ok(Overview {
-        versions: GAME_VERSIONS,
+        versions: PINNED_VERSIONS,
         game_version,
-        profile,
+        loader,
+        hacked,
         hacks_warning_accepted: settings.hacks_warning_accepted,
         hacks_warning: HACKS_WARNING,
         disclaimer: esteban_core::DISCLAIMER,
@@ -108,15 +120,12 @@ pub async fn overview(state: State<'_, AppState>) -> Reply<Overview> {
 }
 
 #[tauri::command]
-pub async fn select(
-    state: State<'_, AppState>,
-    game_version: String,
-    profile: ProfileKind,
-) -> Reply<()> {
-    instance(&state, &game_version, profile)?;
+pub async fn select(state: State<'_, AppState>, selection: Selection) -> Reply<()> {
+    instance(&state, &selection)?;
     let mut settings = load_settings(&state).await?;
-    settings.game_version = Some(game_version);
-    settings.profile = Some(profile);
+    settings.game_version = Some(selection.game_version);
+    settings.loader = Some(selection.loader);
+    settings.hacked = selection.hacked;
     save_settings(&state, &settings).await
 }
 
@@ -130,22 +139,20 @@ pub async fn accept_hacks_warning(state: State<'_, AppState>) -> Reply<()> {
 #[tauri::command]
 pub async fn instance_status(
     state: State<'_, AppState>,
-    game_version: String,
-    profile: ProfileKind,
+    selection: Selection,
 ) -> Reply<InstanceStatus> {
-    let instance = instance(&state, &game_version, profile)?;
+    let instance = instance(&state, &selection)?;
     status(&instance).await.map_err(human)
 }
 
 #[tauri::command]
 pub async fn set_mod(
     state: State<'_, AppState>,
-    game_version: String,
-    profile: ProfileKind,
+    selection: Selection,
     slug: String,
     enabled: bool,
 ) -> Reply<InstanceStatus> {
-    let instance = instance(&state, &game_version, profile)?;
+    let instance = instance(&state, &selection)?;
     instance
         .set_mod_enabled(&slug, enabled)
         .await
@@ -157,11 +164,10 @@ pub async fn set_mod(
 pub async fn install(
     app: AppHandle,
     state: State<'_, AppState>,
-    game_version: String,
-    profile: ProfileKind,
+    selection: Selection,
 ) -> Reply<InstallSummary> {
-    instance(&state, &game_version, profile)?;
-    if profile == ProfileKind::Hacks {
+    let target = instance(&state, &selection)?;
+    if target.hacked {
         let settings = load_settings(&state).await?;
         if !settings.hacks_warning_accepted {
             return Err("Accept the Hacked warning first.".into());
@@ -177,8 +183,7 @@ pub async fn install(
         let result = tauri::async_runtime::block_on(install_instance(
             &net,
             &paths,
-            profile,
-            &game_version,
+            &target,
             InstallOptions {
                 update: false,
                 first_run_options: &[],
@@ -188,7 +193,7 @@ pub async fn install(
         progress.finish();
         let installed = result.map_err(human)?;
         Ok(InstallSummary {
-            loader_version: installed.loader_version,
+            loader_version: installed.loader_label(),
             java_version: installed.java.version,
             mods: installed.mods.len() + installed.extras.len(),
             fetched_files: installed.stats.fetched_files,
@@ -208,10 +213,9 @@ pub async fn install(
 pub async fn open_folder(
     app: AppHandle,
     state: State<'_, AppState>,
-    game_version: String,
-    profile: ProfileKind,
+    selection: Selection,
 ) -> Reply<()> {
-    let instance = instance(&state, &game_version, profile)?;
+    let instance = instance(&state, &selection)?;
     if !instance.dir.is_dir() {
         return Err("Not installed yet, so there is no folder to open.".into());
     }
@@ -385,10 +389,9 @@ pub async fn packs(
     state: State<'_, AppState>,
     action: PackAction,
     from: String,
-    game_version: String,
-    profile: ProfileKind,
+    selection: Selection,
 ) -> Reply<Vec<PackLine>> {
-    let instance = instance(&state, &game_version, profile)?;
+    let instance = instance(&state, &selection)?;
     let from = PathBuf::from(from);
     if !from.is_dir() {
         return Err(format!("{} isn't a folder.", from.display()));

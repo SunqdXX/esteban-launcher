@@ -18,6 +18,27 @@ pub fn expand(args: &[Argument], ctx: &Context<'_>, vars: &HashMap<&str, String>
     out
 }
 
+const LEGACY_JVM: &str = r#"[
+    {"rules":[{"action":"allow","os":{"name":"osx"}}],"value":["-XstartOnFirstThread"]},
+    {"rules":[{"action":"allow","os":{"name":"windows"}}],"value":"-XX:HeapDumpPath=MojangTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump"},
+    {"rules":[{"action":"allow","os":{"arch":"x86"}}],"value":"-Xss1M"},
+    "-Djava.library.path=${natives_directory}",
+    "-Dminecraft.launcher.brand=${launcher_name}",
+    "-Dminecraft.launcher.version=${launcher_version}",
+    "-cp",
+    "${classpath}"
+]"#;
+
+pub fn legacy_jvm() -> Vec<Argument> {
+    serde_json::from_str(LEGACY_JVM).unwrap_or_default()
+}
+
+pub fn legacy_game(line: &str, vars: &HashMap<&str, String>) -> Vec<String> {
+    line.split_whitespace()
+        .map(|part| substitute(part, vars))
+        .collect()
+}
+
 pub fn substitute(template: &str, vars: &HashMap<&str, String>) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
@@ -63,6 +84,55 @@ mod tests {
         assert_eq!(substitute("${natives_directory}/lwjgl", &vars), "/n/lwjgl");
         assert_eq!(substitute("${nope}", &vars), "${nope}");
         assert_eq!(substitute("plain", &vars), "plain");
+    }
+
+    #[test]
+    fn old_versions_get_mojangs_classic_jvm_flags_and_split_game_args() {
+        let platform = Platform {
+            os: OsName::Linux,
+            arch: Arch::X86_64,
+            os_version: None,
+        };
+        let features = BTreeSet::new();
+        let ctx = Context {
+            platform: &platform,
+            features: &features,
+        };
+        let vars = HashMap::from([
+            ("natives_directory", "/i/natives".to_string()),
+            ("launcher_name", "esteban-launcher".to_string()),
+            ("launcher_version", "0.1.0".to_string()),
+            ("classpath", "/a.jar:/b.jar".to_string()),
+            ("auth_player_name", "Steve".to_string()),
+            ("auth_session", "token:t:u".to_string()),
+            ("game_directory", "/i".to_string()),
+            ("game_assets", "/i/resources".to_string()),
+        ]);
+        assert_eq!(legacy_jvm().len(), 8);
+        assert_eq!(
+            expand(&legacy_jvm(), &ctx, &vars),
+            vec![
+                "-Djava.library.path=/i/natives",
+                "-Dminecraft.launcher.brand=esteban-launcher",
+                "-Dminecraft.launcher.version=0.1.0",
+                "-cp",
+                "/a.jar:/b.jar"
+            ]
+        );
+        assert_eq!(
+            legacy_game(
+                "${auth_player_name} ${auth_session}  --gameDir ${game_directory} --assetsDir ${game_assets}",
+                &vars
+            ),
+            vec![
+                "Steve",
+                "token:t:u",
+                "--gameDir",
+                "/i",
+                "--assetsDir",
+                "/i/resources"
+            ]
+        );
     }
 
     #[test]
