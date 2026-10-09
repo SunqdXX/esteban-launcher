@@ -13,6 +13,8 @@ All requests are HTTPS, have timeouts, and send a fixed `User-Agent` that names 
 | `resources.download.minecraft.net` | asset objects |
 | `meta.fabricmc.net` | Fabric loader versions and launch profiles |
 | `maven.fabricmc.net` | Fabric loader, intermediary and their libraries |
+| `files.minecraftforge.net` | Forge's recommended and latest build per game version (`promotions_slim.json`) |
+| `maven.minecraftforge.net` | Forge's version list, installers and libraries |
 | `api.modrinth.com` | mod version lookups |
 | `cdn.modrinth.com` | mod files |
 | `login.microsoftonline.com` | Microsoft sign-in (device code) |

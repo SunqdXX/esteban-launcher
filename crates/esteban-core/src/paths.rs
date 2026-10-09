@@ -74,6 +74,10 @@ impl Paths {
         self.base.join("instances")
     }
 
+    pub fn cache(&self) -> PathBuf {
+        self.base.join("cache")
+    }
+
     pub fn settings_file(&self) -> PathBuf {
         self.home.join("settings.json")
     }

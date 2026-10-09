@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use esteban_core::account::{Secret, Session};
+use esteban_core::catalog;
 use esteban_core::install::{InstallOptions, Installed, install};
 use esteban_core::instance::Instance;
 use esteban_core::launch::{self, QuickPlay, Smoke};
@@ -52,6 +53,23 @@ enum Command {
     Packs(PacksCommand),
     #[command(about = "Print the folder of an instance")]
     Path(Selector),
+    #[command(about = "List every release and which loaders it can use")]
+    Versions,
+    #[command(about = "List the loader builds for a version, newest first")]
+    Loaders(Selector),
+    #[command(about = "Pin a loader build for an instance, or go back to the latest stable one")]
+    LoaderVersion(LoaderPick),
+}
+
+#[derive(Args, Clone)]
+struct LoaderPick {
+    #[command(flatten)]
+    selector: Selector,
+    #[arg(
+        value_name = "BUILD",
+        help = "A build from the loaders list, or latest-stable"
+    )]
+    build: String,
 }
 
 #[derive(Subcommand)]
@@ -230,6 +248,9 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         }
         Command::Packs(PacksCommand::Link(source)) => link_packs(&paths, &source).await,
         Command::Packs(PacksCommand::Import(source)) => import_packs(&paths, &source).await,
+        Command::Versions => list_versions(&net, &paths).await,
+        Command::Loaders(selector) => list_loaders(&net, &paths, &selector).await,
+        Command::LoaderVersion(pick) => pick_loader(&net, &paths, &pick).await,
         Command::Path(selector) => {
             let instance = selector.instance(&paths)?;
             println!("{}", instance.dir.display());
@@ -239,6 +260,89 @@ async fn run(cli: Cli) -> Result<(), Failure> {
             Ok(())
         }
     }
+}
+
+async fn list_versions(net: &Net, paths: &Paths) -> Result<(), Failure> {
+    let catalog = catalog::load(net, paths).await?;
+    if catalog.offline {
+        eprintln!("offline, showing the last saved lists");
+    }
+    for release in &catalog.releases {
+        let mark = |offer: &catalog::Offer| if offer.available { "yes" } else { "-" };
+        let tag = if release.tag.is_empty() {
+            String::new()
+        } else {
+            format!("  {}", release.tag)
+        };
+        println!(
+            "{:<10} {}  fabric {:<3}  forge {:<3}{tag}",
+            release.id,
+            release.date,
+            mark(&release.fabric),
+            mark(&release.forge)
+        );
+    }
+    Ok(())
+}
+
+async fn list_loaders(net: &Net, paths: &Paths, selector: &Selector) -> Result<(), Failure> {
+    let instance = selector.instance(paths)?;
+    let choices =
+        catalog::loader_versions(net, paths, &instance.game_version, instance.loader).await?;
+    let file = instance.read_file().await?;
+    if let Some(note) = &choices.note {
+        eprintln!("{note}");
+    }
+    for v in &choices.versions {
+        let mut marks = Vec::new();
+        if choices.default.as_ref() == Some(&v.version) {
+            marks.push("default");
+        }
+        if v.stable {
+            marks.push("stable");
+        }
+        if file.loader.pinned && file.loader.version.as_ref() == Some(&v.version) {
+            marks.push("pinned");
+        }
+        println!("{}  {}", v.version, marks.join(", "));
+    }
+    if choices.versions.is_empty() {
+        eprintln!("{} has no loader builds to pick from.", instance.label());
+    }
+    Ok(())
+}
+
+async fn pick_loader(net: &Net, paths: &Paths, pick: &LoaderPick) -> Result<(), Failure> {
+    let instance = pick.selector.instance(paths)?;
+    let version = if pick.build == "latest-stable" {
+        None
+    } else {
+        let choices =
+            catalog::loader_versions(net, paths, &instance.game_version, instance.loader).await?;
+        if !choices.versions.iter().any(|v| v.version == pick.build) {
+            return Err(Failure::Error(Error::Unsupported(format!(
+                "{} isn't a {} build for {}. Run loaders to see the list.",
+                pick.build,
+                instance.loader.title(),
+                instance.game_version
+            ))));
+        }
+        Some(pick.build.clone())
+    };
+    instance.set_loader_version(version.clone()).await?;
+    match version {
+        Some(v) => eprintln!(
+            "{} will use {} {v}.",
+            instance.label(),
+            instance.loader.title()
+        ),
+        None => eprintln!(
+            "{} will use the latest stable {} build.",
+            instance.label(),
+            instance.loader.title()
+        ),
+    }
+    Ok(())
 }
 
 async fn link_packs(paths: &Paths, source: &PackSource) -> Result<(), Failure> {

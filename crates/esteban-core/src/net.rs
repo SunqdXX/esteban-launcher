@@ -22,6 +22,8 @@ pub const ALLOWED_HOSTS: &[&str] = &[
     "resources.download.minecraft.net",
     "meta.fabricmc.net",
     "maven.fabricmc.net",
+    "files.minecraftforge.net",
+    "maven.minecraftforge.net",
     "api.modrinth.com",
     "cdn.modrinth.com",
     "login.microsoftonline.com",

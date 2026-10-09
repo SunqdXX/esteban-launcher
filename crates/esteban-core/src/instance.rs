@@ -217,6 +217,22 @@ impl Instance {
         Ok(known.title)
     }
 
+    pub async fn set_loader_version(&self, version: Option<String>) -> Result<InstanceFile> {
+        if self.loader == Loader::Vanilla && version.is_some() {
+            return Err(Error::Unsupported(
+                "Vanilla has no loader version to pick.".into(),
+            ));
+        }
+        if let Some(v) = &version {
+            token(v)?;
+        }
+        let mut file = self.read_file().await?;
+        file.loader.pinned = version.is_some();
+        file.loader.version = version;
+        self.write_file(&file).await?;
+        Ok(file)
+    }
+
     pub async fn unmanaged_jars(&self, lock: Option<&ModLock>) -> Result<Vec<String>> {
         let mods = self.mods_dir();
         let mut entries = match tokio::fs::read_dir(&mods).await {
@@ -777,6 +793,37 @@ mod tests {
             forge.set_mod_enabled("iris", false).await,
             Err(Error::Mods(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn a_picked_loader_version_is_pinned_until_reset() {
+        let dir = tempfile::tempdir().unwrap();
+        let instance = instance_at(&dir, "1.20.1", Loader::Forge, false).await;
+        let file = instance
+            .set_loader_version(Some("47.4.10".into()))
+            .await
+            .unwrap();
+        assert!(file.loader.pinned);
+        assert_eq!(
+            instance
+                .read_file()
+                .await
+                .unwrap()
+                .loader
+                .version
+                .as_deref(),
+            Some("47.4.10")
+        );
+        let file = instance.set_loader_version(None).await.unwrap();
+        assert!(!file.loader.pinned && file.loader.version.is_none());
+        assert!(
+            instance
+                .set_loader_version(Some("../x".into()))
+                .await
+                .is_err()
+        );
+        let vanilla = instance_at(&dir, "1.8.9", Loader::Vanilla, false).await;
+        assert!(vanilla.set_loader_version(Some("1".into())).await.is_err());
     }
 
     #[tokio::test]
