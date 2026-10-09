@@ -112,6 +112,12 @@ pub fn verify_with(
             purpose.slug()
         )));
     }
+    if signature.trim().is_empty() {
+        return Err(Error::Guard(format!(
+            "{} has no signature, so it was ignored.",
+            purpose.what()
+        )));
+    }
     let signature = Signature::decode(signature)
         .map_err(|_| Error::Guard(format!("{} has a broken signature file.", purpose.what())))?;
     for key in keys {
@@ -225,6 +231,10 @@ pub(crate) mod tests {
             std::slice::from_ref(&key.public),
             data,
             "not a signature"
+        ));
+        assert!(matches!(
+            verify_with(std::slice::from_ref(&key.public), Purpose::Channel, data, "  "),
+            Err(Error::Guard(m)) if m.contains("has no signature")
         ));
         assert!(refused(&[], data, &signature));
         let swapped = signature.replace("trusted comment: c", "trusted comment: d");

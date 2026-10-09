@@ -339,7 +339,10 @@ async fn show_channel(net: &Net, paths: &Paths) -> Result<(), Failure> {
         None if report.keys == 0 => {
             println!("  no channel key is built in yet, so only the built-in list is used")
         }
-        None => println!("  nothing newer is published, so the built-in list is used"),
+        None if report.notice.is_some() => {
+            println!("  no signed list could be used, so the built-in list is used")
+        }
+        None => println!("  nothing is published yet, so the built-in list is used"),
     }
     if let Some(notice) = &report.notice {
         println!("  {notice}");

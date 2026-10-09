@@ -381,7 +381,12 @@ pub async fn refresh_with(
                 Ok((channel, verified)) => {
                     chosen = Some((Arc::new(channel), Source::Saved, verified));
                 }
-                Err(e) => tracing::warn!(error = %e, "the saved Esteban version list isn't usable"),
+                Err(e) => {
+                    tracing::warn!(error = %e, "the saved Esteban version list isn't usable");
+                    if notice.is_none() {
+                        notice = Some(format!("The copy saved on this computer was refused: {e}"));
+                    }
+                }
             }
         }
     }
@@ -651,7 +656,7 @@ mod tests {
             let unsigned = run(body.clone(), None).await;
             println!("REAL-KEY no signature file: {unsigned:?}");
             assert_eq!(unsigned.source, Source::Bundled);
-            assert!(unsigned.notice.is_some());
+            assert!(unsigned.notice.unwrap().contains("has no signature"));
 
             let stranger = TestKey::new();
             let forged = run(
