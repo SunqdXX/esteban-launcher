@@ -4,8 +4,6 @@
 
 - [ ] Servers is still an empty screen. Saved servers and Launch and join come in M6, after sign-in.
 - [ ] Play installs and verifies, then stops: launching needs Microsoft sign-in (M2). The account card on Play and the Account section in Settings are placeholders with disabled Sign in buttons.
-- [ ] The disclaimer lives in the sidebar footer. The About screen copy comes in M4.
-- [ ] No signing key is in `config/keys.json` yet, so the launcher only uses its compiled-in `versions.json` and doesn't check for updates. Both start working once the public keys are added and a signed `versions.json` / `latest.json` is published.
 - [ ] "Upload to my Minecraft account" on the Skins screen is disabled until Microsoft sign-in (M2).
 - [ ] A Java picked in Settings is checked to be Java, but not yet against the major version each Minecraft version needs. A wrong one fails at launch with Java's own error.
 - [ ] Launching needs Microsoft sign-in (M2). Until then only install, plan and mods work.
@@ -32,5 +30,5 @@
 - [x] BTC and XMR addresses and the Discord invite are in `config/donate.json`.
 - [x] USDC address (Solana) is in `config/donate.json`.
 - [x] Channel and updater keys made by the owner, public keys in `config/keys.json` (channel F06D6DD40133B8FC, updater 1B5726E0D3D4ECBE).
-- [ ] Decide where launcher downloads live before the first public release (separate download repo). The release workflow, the updater endpoint and `latest.json` use the launcher repo's releases until then.
-- [ ] Windows installers aren't code-signed, so SmartScreen warns on first run. A code-signing certificate fixes that.
+- [x] Launcher downloads, the updater endpoint and `latest.json` stay on this repo's GitHub releases for v1.
+- [ ] Windows installers aren't code-signed, so SmartScreen warns on first run. Shipping without a certificate for now, revisit later.
