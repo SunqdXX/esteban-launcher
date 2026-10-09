@@ -314,6 +314,37 @@ impl Instance {
     }
 }
 
+pub fn parse_folder(paths: &Paths, name: &str) -> Option<Instance> {
+    let (rest, hacked) = match name.strip_suffix("-hacked") {
+        Some(rest) => (rest, true),
+        None => (name, false),
+    };
+    let (slug, version) = rest.split_once('-')?;
+    let loader: Loader = slug.parse().ok()?;
+    let instance = Instance::new(paths, version, loader, hacked).ok()?;
+    (folder_name(&instance.game_version, loader, hacked) == name).then_some(instance)
+}
+
+pub async fn list(paths: &Paths) -> Result<Vec<Instance>> {
+    let root = paths.instances();
+    let mut entries = match tokio::fs::read_dir(&root).await {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e).at(&root),
+    };
+    let mut out = Vec::new();
+    while let Some(entry) = entries.next_entry().await.at(&root)? {
+        if !entry.file_type().await.at(&entry.path())?.is_dir() {
+            continue;
+        }
+        if let Some(instance) = parse_folder(paths, &entry.file_name().to_string_lossy()) {
+            out.push(instance);
+        }
+    }
+    out.sort_by(|a, b| a.dir.cmp(&b.dir));
+    Ok(out)
+}
+
 pub async fn migrate_folders(paths: &Paths) -> Result<Vec<(String, String)>> {
     let root = paths.instances();
     let mut entries = match tokio::fs::read_dir(&root).await {
@@ -917,6 +948,41 @@ mod tests {
             instance.read_file().await,
             Err(Error::Unsupported(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn existing_instances_are_listed_from_their_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        let root = paths.instances();
+        for name in [
+            "fabric-1.21.4-hacked",
+            "forge-1.20.1",
+            "vanilla-1.8.9",
+            "clean-1.21.4",
+            "forge-1.20.1-hacked",
+            "quilt-1.20.1",
+            "fabric-",
+        ] {
+            std::fs::create_dir_all(root.join(name)).unwrap();
+        }
+        std::fs::write(root.join("vanilla-1.7.10"), b"a file").unwrap();
+        let found: Vec<String> = list(&paths)
+            .await
+            .unwrap()
+            .iter()
+            .map(Instance::label)
+            .collect();
+        assert_eq!(
+            found,
+            vec!["Fabric 1.21.4 Hacked", "Forge 1.20.1", "Vanilla 1.8.9"]
+        );
+        assert!(
+            list(&Paths::new(dir.path().join("none")))
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]

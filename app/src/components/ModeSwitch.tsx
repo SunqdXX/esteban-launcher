@@ -1,33 +1,35 @@
-import { MODE_LABEL, type Profile } from "../api";
 import { cx } from "../cx";
 import styles from "./ModeSwitch.module.css";
 
 interface ModeSwitchProps {
-  value: Profile;
+  hacked: boolean;
   disabled?: boolean;
   compact?: boolean;
-  onChange: (profile: Profile) => void;
+  onChange: (hacked: boolean) => void;
 }
 
-const MODES: Profile[] = ["clean", "hacks"];
+const MODES = [
+  { hacked: false, label: "Normal" },
+  { hacked: true, label: "Hacked" },
+];
 
-export default function ModeSwitch({ value, disabled, compact, onChange }: ModeSwitchProps) {
+export default function ModeSwitch({ hacked, disabled, compact, onChange }: ModeSwitchProps) {
   return (
     <div className={cx(styles.modes, compact && styles.compact)} role="radiogroup" aria-label="Mode">
       {MODES.map((mode) => (
         <button
-          key={mode}
+          key={mode.label}
           type="button"
           role="radio"
-          aria-checked={mode === value}
+          aria-checked={mode.hacked === hacked}
           disabled={disabled}
-          className={cx(styles.mode, mode === value && styles.on, mode === "hacks" && styles.hacked)}
+          className={cx(styles.mode, mode.hacked === hacked && styles.on, mode.hacked && styles.hacked)}
           onClick={() => {
-            if (mode !== value) onChange(mode);
+            if (mode.hacked !== hacked) onChange(mode.hacked);
           }}
         >
           <span className={styles.dot} />
-          {MODE_LABEL[mode]}
+          {mode.label}
         </button>
       ))}
     </div>

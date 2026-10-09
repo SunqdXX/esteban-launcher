@@ -1,9 +1,22 @@
 import { useState } from "react";
-import { MODE_LABEL, listTitles, type InstanceStatus, type Progress, type Selection } from "../api";
+import {
+  LOADER_LABEL,
+  LOADERS,
+  buildLabel,
+  hackedAllowed,
+  listTitles,
+  offerFor,
+  sameSelection,
+  selectionLabel,
+  type InstanceStatus,
+  type Progress,
+  type Selection,
+} from "../api";
 import letters from "../assets/backgrounds/letters.png";
 import meadow from "../assets/backgrounds/meadow.png";
 import AccountCard from "../components/AccountCard";
 import HacksWarning from "../components/HacksWarning";
+import LoaderSwitch from "../components/LoaderSwitch";
 import ModeSwitch from "../components/ModeSwitch";
 import VersionPicker from "../components/VersionPicker";
 import { cx } from "../cx";
@@ -17,19 +30,24 @@ const STAGES: Record<string, string> = {
   assets: "Sounds and textures",
   "java runtime": "Java",
   mods: "Mods",
+  "skin mod": "Skin mod",
 };
 
 function mb(bytes: number): string {
   return (bytes / 1_048_576).toFixed(1);
 }
 
-function cleanNote(status: InstanceStatus | null): string {
-  if (!status) return "";
-  const titles = status.mods
+function loaderNote(selection: Selection, status: InstanceStatus | null, pinned: boolean): string {
+  if (selection.loader === "vanilla") return `Vanilla ${selection.gameVersion}, just the game.`;
+  const named = status?.loaderVersion
+    ? `${LOADER_LABEL[selection.loader]} ${buildLabel(selection.gameVersion, status.loaderVersion)}`
+    : LOADER_LABEL[selection.loader];
+  if (selection.loader === "forge") return `${named} with the skin mod. Add your own mods to its folder.`;
+  const titles = (status?.mods ?? [])
     .filter((m) => m.managed && m.wanted && !m.required && !(m.skipped && !m.installed))
     .map((m) => m.title);
-  const fabric = status.loaderVersion ? `Fabric ${status.loaderVersion}` : "Fabric";
-  return `${fabric} with ${listTitles([...titles, "the Esteban HUD"])}.`;
+  const extras = pinned ? [...titles, "the Esteban HUD"] : titles;
+  return extras.length > 0 ? `${named} with ${listTitles(extras)}.` : `${named}.`;
 }
 
 function progressLine(p: Progress, rate: number | null): string {
@@ -59,9 +77,16 @@ export default function PlayPage({ launcher }: PlayPageProps) {
   const [warning, setWarning] = useState(false);
   if (!overview || !selection) return <div className={styles.play} />;
 
-  const hacked = selection.profile === "hacks";
+  const hacked = selection.hacked;
   const busy = installing !== null;
-  const mine = installing?.gameVersion === selection.gameVersion && installing.profile === selection.profile;
+  const mine = sameSelection(installing, selection);
+  const release = launcher.releases.find((r) => r.id === selection.gameVersion);
+  const pinned = overview.pinned.some((p) => p.id === selection.gameVersion);
+  const canHack = hackedAllowed(selection, overview.pinned);
+  const blocked = LOADERS.map((l) => offerFor(release, l))
+    .filter((o) => !o.available && o.reason)
+    .map((o) => o.reason)
+    .join(" ");
   const pending = status?.mods.some((m) => m.managed && m.wanted !== m.installed && !(m.wanted && m.skipped)) ?? false;
 
   const start = (target: Selection) => {
@@ -79,7 +104,7 @@ export default function PlayPage({ launcher }: PlayPageProps) {
   let line: { text: string; tone: "ok" | "info" | "error" | "dim" };
   if (outcome?.kind === "error") line = { text: outcome.text, tone: "error" };
   else if (outcome?.kind === "ready") line = { text: "Ready. Launching needs Microsoft sign-in, coming in a later update.", tone: "info" };
-  else if (busy && !mine) line = { text: `Installing ${installing.gameVersion} ${MODE_LABEL[installing.profile]} first`, tone: "dim" };
+  else if (busy && !mine) line = { text: `Installing ${selectionLabel(installing)} first`, tone: "dim" };
   else if (!status) line = { text: "Checking", tone: "dim" };
   else if (!status.installed) line = { text: "Not installed yet", tone: "dim" };
   else if (pending) line = { text: "Mod changes apply on Play", tone: "info" };
@@ -99,7 +124,8 @@ export default function PlayPage({ launcher }: PlayPageProps) {
           <div>
             <p className={styles.label}>Version</p>
             <VersionPicker
-              versions={overview.versions}
+              releases={launcher.releases}
+              pinned={overview.pinned}
               value={selection.gameVersion}
               disabled={busy}
               opensUp
@@ -109,14 +135,27 @@ export default function PlayPage({ launcher }: PlayPageProps) {
             />
           </div>
           <div>
-            <p className={styles.label}>Mode</p>
-            <ModeSwitch
-              value={selection.profile}
+            <p className={styles.label}>Loader</p>
+            <LoaderSwitch
+              release={release}
+              value={selection.loader}
               disabled={busy}
-              onChange={(profile) => {
-                launcher.select({ ...selection, profile });
+              onChange={(loader) => {
+                launcher.select({ ...selection, loader });
               }}
             />
+            {canHack && (
+              <div className={styles.mode}>
+                <ModeSwitch
+                  hacked={hacked}
+                  disabled={busy}
+                  compact
+                  onChange={(next) => {
+                    launcher.select({ ...selection, hacked: next });
+                  }}
+                />
+              </div>
+            )}
             {hacked ? (
               <p className={cx(styles.note, styles.warn)}>
                 <b>Hacks mod on top of Normal.</b> Most servers ban it.{" "}
@@ -124,16 +163,20 @@ export default function PlayPage({ launcher }: PlayPageProps) {
               </p>
             ) : (
               <p className={styles.note}>
-                <b>{cleanNote(status)}</b> No cheat code.{status && !status.installed ? " Everything downloads and gets checked on the first Play." : ""}
+                <b>{loaderNote(selection, status, pinned)}</b>
+                {selection.loader === "fabric" ? " No cheat code." : ""}
+                {status && !status.installed ? " Everything downloads and gets checked on the first Play." : ""}
               </p>
             )}
+            {blocked && <p className={styles.blocked}>{blocked}</p>}
           </div>
           <div>
             <p className={styles.label}>&nbsp;</p>
             <button type="button" className={styles.go} disabled={busy} onClick={play}>
               <span className={styles.word}>PLAY</span>
               <span className={styles.what}>
-                {selection.gameVersion} {MODE_LABEL[selection.profile]}
+                {selection.gameVersion} {LOADER_LABEL[selection.loader]}
+                {hacked ? " Hacked" : ""}
               </span>
             </button>
             <div className={styles.statusArea}>
@@ -165,7 +208,7 @@ export default function PlayPage({ launcher }: PlayPageProps) {
           warning={overview.hacksWarning}
           onCancel={() => {
             setWarning(false);
-            launcher.select({ ...selection, profile: "clean" });
+            launcher.select({ ...selection, hacked: false });
           }}
           onAccept={() => {
             setWarning(false);

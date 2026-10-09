@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import type { GameVersion } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { PinnedVersion, Release } from "../api";
 import { cx } from "../cx";
 import PixelIcon, { CHEVRON_DOWN, CHEVRON_UP } from "./PixelIcon";
 import styles from "./VersionPicker.module.css";
 
 interface VersionPickerProps {
-  versions: GameVersion[];
+  releases: Release[];
+  pinned: PinnedVersion[];
   value: string;
   disabled?: boolean;
   compact?: boolean;
@@ -13,10 +14,27 @@ interface VersionPickerProps {
   onChange: (id: string) => void;
 }
 
-export default function VersionPicker({ versions, value, disabled, compact, opensUp, onChange }: VersionPickerProps) {
+interface Row {
+  id: string;
+  note: string;
+}
+
+export default function VersionPicker({ releases, pinned, value, disabled, compact, opensUp, onChange }: VersionPickerProps) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const root = useRef<HTMLDivElement>(null);
-  const current = versions.find((v) => v.id === value);
+  const tag = pinned.find((p) => p.id === value)?.tag ?? "";
+
+  const groups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const match = (id: string) => q === "" || id.toLowerCase().includes(q);
+    const ours: Row[] = pinned.filter((p) => match(p.id)).map((p) => ({ id: p.id, note: p.tag }));
+    const all: Row[] = releases
+      .filter((r) => !r.pinned && match(r.id))
+      .map((r) => ({ id: r.id, note: r.date.slice(0, 4) }))
+      .sort((a, b) => Number(!a.id.startsWith(q)) - Number(!b.id.startsWith(q)));
+    return { ours, all };
+  }, [pinned, releases, query]);
 
   useEffect(() => {
     if (!open) return;
@@ -34,28 +52,59 @@ export default function VersionPicker({ versions, value, disabled, compact, open
     };
   }, [open]);
 
+  const pick = (id: string) => {
+    setOpen(false);
+    setQuery("");
+    if (id !== value) onChange(id);
+  };
+
+  const option = (row: Row) => (
+    <li key={row.id}>
+      <button
+        type="button"
+        role="option"
+        aria-selected={row.id === value}
+        className={cx(styles.option, row.id === value && styles.on)}
+        onClick={() => {
+          pick(row.id);
+        }}
+      >
+        <span className={styles.v}>{row.id}</span>
+        {row.note && <span className={styles.tag}>{row.note}</span>}
+      </button>
+    </li>
+  );
+
   return (
     <div ref={root} className={cx(styles.picker, compact && styles.compact)}>
       {open && (
-        <ul className={cx(styles.list, opensUp ? styles.up : styles.down)} role="listbox" aria-label="Minecraft version">
-          {versions.map((v) => (
-            <li key={v.id}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={v.id === value}
-                className={cx(styles.option, v.id === value && styles.on)}
-                onClick={() => {
-                  setOpen(false);
-                  if (v.id !== value) onChange(v.id);
-                }}
-              >
-                <span className={styles.v}>{v.id}</span>
-                {v.tag && <span className={styles.tag}>{v.tag}</span>}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className={cx(styles.list, opensUp ? styles.up : styles.down)}>
+          <input
+            className={styles.search}
+            autoFocus
+            value={query}
+            placeholder="Search versions"
+            aria-label="Search versions"
+            onChange={(e) => {
+              setQuery(e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                const first = groups.ours[0] ?? groups.all[0];
+                if (first) pick(first.id);
+              }
+            }}
+          />
+          <div className={styles.scroll}>
+            <ul className={styles.group} role="listbox" aria-label="Minecraft version">
+              {groups.ours.length > 0 && <li className={styles.heading}>Esteban versions</li>}
+              {groups.ours.map(option)}
+              {groups.all.length > 0 && <li className={styles.heading}>All releases</li>}
+              {groups.all.map(option)}
+              {groups.ours.length + groups.all.length === 0 && <li className={styles.none}>No release matches {query}</li>}
+            </ul>
+          </div>
+        </div>
       )}
       <button
         type="button"
@@ -67,8 +116,8 @@ export default function VersionPicker({ versions, value, disabled, compact, open
           setOpen(!open);
         }}
       >
-        <span className={styles.v}>{current?.id ?? value}</span>
-        {current?.tag && <span className={styles.selectTag}>{current.tag}</span>}
+        <span className={styles.v}>{value}</span>
+        {tag && <span className={styles.selectTag}>{tag}</span>}
         <span className={styles.chev}>
           <PixelIcon cells={open ? CHEVRON_UP : CHEVRON_DOWN} />
         </span>

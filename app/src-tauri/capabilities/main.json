@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
   "description": "Main window. Titlebar controls, the launcher's own commands and its progress events.",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
@@ -28,6 +30,15 @@
     "allow-set-data-dir",
     "allow-packs",
     "allow-about",
-    "allow-open-link"
+    "allow-open-link",
+    "allow-catalog",
+    "allow-loader-versions",
+    "allow-set-loader-version",
+    "allow-instances",
+    "allow-skins",
+    "allow-import-skin",
+    "allow-update-skin",
+    "allow-remove-skin",
+    "allow-set-skin"
   ]
 }

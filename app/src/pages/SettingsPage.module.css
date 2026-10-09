@@ -183,7 +183,7 @@
 
 .target {
   display: grid;
-  grid-template-columns: 150px 220px;
+  grid-template-columns: 130px 270px 190px;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
 }

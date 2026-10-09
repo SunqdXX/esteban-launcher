@@ -19,6 +19,7 @@ fn state() -> esteban_core::Result<commands::AppState> {
         paths: std::sync::RwLock::new(paths),
         net: Net::launcher()?,
         busy: tokio::sync::Mutex::new(()),
+        catalog: tokio::sync::Mutex::new(None),
     })
 }
 
@@ -81,6 +82,15 @@ fn main() {
             commands::packs,
             commands::about,
             commands::open_link,
+            commands::catalog,
+            commands::loader_versions,
+            commands::set_loader_version,
+            commands::instances,
+            commands::skins,
+            commands::import_skin,
+            commands::update_skin,
+            commands::remove_skin,
+            commands::set_skin,
         ])
         .run(tauri::generate_context!());
     if let Err(error) = result {

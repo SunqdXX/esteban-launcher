@@ -5,11 +5,17 @@
 - [ ] Servers is still an empty screen. Saved servers and Launch and join come in M6, after sign-in.
 - [ ] Play installs and verifies, then stops: launching needs Microsoft sign-in (M2). The account card on Play and the Account section in Settings are placeholders with disabled Sign in buttons.
 - [ ] The disclaimer lives in the sidebar footer. The About screen copy comes in M4.
-- [ ] The HUD jar (both modes) and the hacks jar (Hacked only) come from the pinned esteban v1.4.0 release (`esteban.rs`, sha256 checked). They are replaced by the signed `versions.json` channel in M5. The v1.3.0 hacks hashes stay on the clean guard's list.
+- [ ] The HUD jar (Fabric on the Esteban versions) and the hacks jar (Hacked only) come from `config/versions.json` (schema 2) compiled into the launcher, sha256 checked. M5 fetches it from the release channel and checks its signature. The v1.3.0 hacks hashes stay on the guard's list.
+- [ ] "Upload to my Minecraft account" on the Skins screen is disabled until Microsoft sign-in (M2).
 - [ ] A Java picked in Settings is checked to be Java, but not yet against the major version each Minecraft version needs. A wrong one fails at launch with Java's own error.
 - [ ] Launching needs Microsoft sign-in (M2). Until then only install, plan and mods work.
 
 ## Known gaps
+
+- [ ] Local skins need CustomSkinLoader, which has no build for 26.3 or 1.7.10 and older yet. Those say so on the Skins screen.
+- [ ] Forge 1.5.2 is left out: it only starts with the signature files stripped out of Mojang's game jar.
+- [ ] Not every one of the 103 releases has been launched. Started so far: vanilla 1.5.2, 1.6.4, 1.8.9, 1.16.5, Fabric 1.21.4, Forge 1.6.1, 1.6.4, 1.7.10, 1.8.9, 1.12.2, 1.20.1.
+- [ ] Versions 1.12.2 and older use LWJGL 2, which needs XWayland and the `xrandr` command on Linux.
 
 - [ ] Windows build number is not read yet, so Mojang's `versionRange` rules (ZGC on 26.x) never match on Windows and the JVM default GC is used there. Needed for M6.
 - [ ] No launch test in CI yet. It needs a signed-in account, so it comes after M2.

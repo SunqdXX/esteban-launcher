@@ -6,6 +6,7 @@ use crate::Result;
 use crate::instance::Instance;
 use crate::loader::Loader;
 use crate::modrinth::DEFAULT_MODS;
+use crate::skins::{self, SKIN_MOD_SLUG};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +55,9 @@ pub struct InstanceStatus {
     pub loader_version: Option<String>,
     pub loader_pinned: bool,
     pub skin: Option<String>,
+    pub skin_mod: Option<String>,
+    pub skin_note: Option<String>,
+    pub hacked_allowed: bool,
     pub mods: Vec<ModRow>,
     pub extras: Vec<ExtraJar>,
     pub unmanaged: Vec<String>,
@@ -93,7 +97,7 @@ pub async fn status(instance: &Instance) -> Result<InstanceStatus> {
         });
     }
     if let Some(lock) = &lock {
-        for m in &lock.mods {
+        for m in lock.mods.iter().filter(|m| m.slug != SKIN_MOD_SLUG) {
             if defaults
                 .iter()
                 .any(|d| d.slug == m.slug || d.title == m.title)
@@ -113,6 +117,17 @@ pub async fn status(instance: &Instance) -> Result<InstanceStatus> {
         }
     }
     let unmanaged = instance.unmanaged_jars(lock.as_ref()).await?;
+    let skin_mod = lock.as_ref().and_then(|l| {
+        l.mods
+            .iter()
+            .find(|m| m.slug == SKIN_MOD_SLUG)
+            .map(|m| m.version_number.clone())
+    });
+    let skin_note = if instance.loader == Loader::Vanilla || lock.is_some() {
+        skins::availability(instance, skin_mod.is_some())
+    } else {
+        None
+    };
     Ok(InstanceStatus {
         loader: instance.loader,
         hacked: instance.hacked,
@@ -121,6 +136,9 @@ pub async fn status(instance: &Instance) -> Result<InstanceStatus> {
         loader_version: file.loader.version.clone(),
         loader_pinned: file.loader.pinned,
         skin: file.skin.clone(),
+        skin_mod,
+        skin_note,
+        hacked_allowed: crate::instance::hacked_allowed(&instance.game_version, instance.loader),
         mods,
         extras: lock
             .map(|l| l.extras.iter().map(|f| ExtraJar::from_file(f)).collect())
@@ -232,6 +250,18 @@ mod tests {
             let instance = Instance::new(&paths, version, loader, false).unwrap();
             let s = status(&instance).await.unwrap();
             assert!(s.mods.is_empty() && !s.installed && s.loader == loader);
+            assert!(!s.hacked_allowed);
         }
+        let vanilla = Instance::new(&paths, "1.8.9", Loader::Vanilla, false).unwrap();
+        assert!(
+            status(&vanilla)
+                .await
+                .unwrap()
+                .skin_note
+                .unwrap()
+                .starts_with("Vanilla")
+        );
+        let forge = Instance::new(&paths, "1.20.1", Loader::Forge, false).unwrap();
+        assert!(status(&forge).await.unwrap().skin_note.is_none());
     }
 }

@@ -176,3 +176,14 @@
   font-size: var(--text-xs);
   color: var(--cyan);
 }
+
+.mode {
+  margin-top: var(--space-2);
+}
+
+.blocked {
+  margin: var(--space-1) 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}

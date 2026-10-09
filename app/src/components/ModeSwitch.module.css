@@ -54,3 +54,17 @@
 .compact {
   height: 36px;
 }
+
+.three {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.unavailable {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--border);
+}
+
+.unavailable .dot {
+  background: var(--border);
+}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { api, message, type InstanceStatus, type Profile, type Selection } from "../api";
+import { LOADER_LABEL, api, buildLabel, message, plural, sameSelection, type InstanceStatus, type Selection, type SkinCard } from "../api";
 import PixelIcon, { FOLDER } from "../components/PixelIcon";
+import SkinPreview, { Silhouette } from "../components/SkinPreview";
 import { cx } from "../cx";
 import type { Launcher } from "../useLauncher";
 import styles from "./ProfilesPage.module.css";
@@ -10,36 +11,21 @@ interface ProfilesPageProps {
   onPlay: () => void;
 }
 
-const CARDS: { profile: Profile; name: string; text: string }[] = [
-  {
-    profile: "clean",
-    name: "Normal",
-    text: "Fabric and the performance mods. No cheat code, the hacks mod is never downloaded into it.",
-  },
-  {
-    profile: "hacks",
-    name: "Hacked",
-    text: "Everything in Normal plus the Esteban hacks mod, in its own folders. Most servers ban it.",
-  },
-];
-
-const key = (s: Selection) => `${s.profile}-${s.gameVersion}`;
+const of = (s: InstanceStatus): Selection => ({ gameVersion: s.gameVersion, loader: s.loader, hacked: s.hacked });
 
 export default function ProfilesPage({ launcher, onPlay }: ProfilesPageProps) {
-  const { overview, selection, installing, revision } = launcher;
-  const [statuses, setStatuses] = useState<Record<string, InstanceStatus>>({});
+  const { overview, selection, status, installing, revision, releases } = launcher;
+  const [found, setFound] = useState<InstanceStatus[] | null>(null);
+  const [skins, setSkins] = useState<SkinCard[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!overview) return;
     let cancelled = false;
-    const targets = CARDS.flatMap((c) => overview.versions.map((v) => ({ gameVersion: v.id, profile: c.profile })));
-    Promise.all(targets.map((t) => api.status(t)))
-      .then((list) => {
+    Promise.all([api.instances(), api.skins()])
+      .then(([list, library]) => {
         if (cancelled) return;
-        const next: Record<string, InstanceStatus> = {};
-        for (const s of list) next[key(s)] = s;
-        setStatuses(next);
+        setFound(list);
+        setSkins(library);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(message(e));
@@ -47,86 +33,96 @@ export default function ProfilesPage({ launcher, onPlay }: ProfilesPageProps) {
     return () => {
       cancelled = true;
     };
-  }, [overview, revision]);
+  }, [revision]);
 
   if (!overview || !selection) return null;
+
+  const order = (s: InstanceStatus) => {
+    const at = releases.findIndex((r) => r.id === s.gameVersion);
+    return at < 0 ? releases.length : at;
+  };
+  const rows = [...(found ?? [])];
+  if (status && !rows.some((r) => sameSelection(of(r), selection))) rows.push(status);
+  rows.sort((a, b) => order(a) - order(b) || a.loader.localeCompare(b.loader) || Number(a.hacked) - Number(b.hacked));
 
   return (
     <div className={styles.page}>
       <header className={styles.header}>
         <h1 className={styles.title}>Profiles</h1>
-        <p className={styles.sub}>Each mode keeps its own folder for every version: worlds, settings and mods stay apart.</p>
+        <p className={styles.sub}>Every version and loader keeps its own folder, so worlds, settings and mods stay apart.</p>
       </header>
       {error && <p className={styles.error}>{error}</p>}
-      <div className={styles.cards}>
-        {CARDS.map((card) => (
-          <section key={card.profile} className={cx(styles.card, card.profile === "hacks" && styles.hacked)}>
-            <div className={styles.cardHead}>
-              <h2 className={styles.name}>
-                <span className={styles.dot} />
-                {card.name}
-              </h2>
-              {card.profile === "clean" ? (
-                <span className={styles.chip}>Default</span>
-              ) : (
-                <span className={cx(styles.chip, overview.hacksWarningAccepted && styles.chipOn)}>
-                  {overview.hacksWarningAccepted ? "Warning accepted" : "Warning shows first"}
+      {found && rows.length === 0 && <p className={styles.empty}>Nothing installed yet. Pick a version on Play and hit PLAY.</p>}
+      {rows.length > 0 && (
+        <ul className={styles.rows}>
+          <li className={cx(styles.row, styles.columns)} aria-hidden="true">
+            <span>Loader</span>
+            <span>Version</span>
+            <span>Build</span>
+            <span>Skin</span>
+            <span />
+            <span />
+          </li>
+          {rows.map((s) => {
+            const target = of(s);
+            const current = sameSelection(target, selection);
+            const busy = sameSelection(installing, target);
+            const mods = s.mods.filter((m) => m.installed).length + s.extras.length + (s.skinMod ? 1 : 0);
+            const skin = skins.find((k) => k.id === s.skin);
+            const tag = overview.pinned.find((p) => p.id === s.gameVersion)?.tag ?? "";
+            let state: string;
+            if (busy) state = "Installing";
+            else if (!s.installed) state = "Not installed";
+            else if (s.loader === "vanilla") state = "Vanilla, no mods";
+            else state = `${LOADER_LABEL[s.loader]} ${buildLabel(s.gameVersion, s.loaderVersion)}${s.loaderPinned ? " (picked)" : ""} · ${plural(mods, "mod")}`;
+            return (
+              <li key={`${s.loader}-${s.gameVersion}-${String(s.hacked)}`} className={cx(styles.row, current && styles.current)}>
+                <span className={styles.loader}>
+                  <span className={cx(styles.dot, styles[s.hacked ? "hacked" : s.loader])} />
+                  {LOADER_LABEL[s.loader]}
+                  {s.hacked && <span className={styles.hackedTag}>Hacked</span>}
                 </span>
-              )}
-            </div>
-            <p className={styles.text}>{card.text}</p>
-            <ul className={styles.rows}>
-              {overview.versions.map((v) => {
-                const target = { gameVersion: v.id, profile: card.profile };
-                const s = statuses[key(target)];
-                const current = selection.gameVersion === v.id && selection.profile === card.profile;
-                const busy = installing?.gameVersion === v.id && installing.profile === card.profile;
-                const mods = s ? s.mods.filter((m) => m.installed).length + s.extras.length : 0;
-                return (
-                  <li key={v.id} className={cx(styles.row, current && styles.current)}>
-                    <span className={styles.v}>{v.id}</span>
-                    <span className={styles.tag}>{v.tag}</span>
-                    <span className={styles.state}>
-                      {busy
-                        ? "Installing"
-                        : !s
-                          ? ""
-                          : s.installed
-                            ? `Fabric ${s.loaderVersion ?? ""} · ${String(mods)} mods`
-                            : "Not installed"}
-                    </span>
-                    <button
-                      type="button"
-                      className={styles.icon}
-                      aria-label={`Open the ${card.name} ${v.id} folder`}
-                      title="Open folder"
-                      disabled={!s?.installed}
-                      onClick={() => {
-                        api.openFolder(target).catch((e: unknown) => {
-                          setError(message(e));
-                        });
-                      }}
-                    >
-                      <PixelIcon cells={FOLDER} />
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.use}
-                      disabled={current}
-                      onClick={() => {
-                        launcher.select(target);
-                        onPlay();
-                      }}
-                    >
-                      {current ? "Selected" : "Use"}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        ))}
-      </div>
+                <span className={styles.v}>
+                  {s.gameVersion}
+                  {tag && <span className={styles.tag}>{tag}</span>}
+                </span>
+                <span className={styles.state}>{state}</span>
+                <span className={styles.skin} title={s.skinNote ?? undefined}>
+                  <span className={styles.head}>
+                    {skin ? <SkinPreview rows={skin.preview} head label={skin.name} /> : <Silhouette head label="Account skin" />}
+                  </span>
+                  <span className={cx(styles.skinName, !skin && styles.dim)}>{s.skinNote && s.loader === "vanilla" ? "Account skin only" : (skin?.name ?? "Account skin")}</span>
+                </span>
+                <button
+                  type="button"
+                  className={styles.icon}
+                  aria-label={`Open the ${LOADER_LABEL[s.loader]} ${s.gameVersion} folder`}
+                  title="Open folder"
+                  disabled={!s.installed}
+                  onClick={() => {
+                    api.openFolder(target).catch((e: unknown) => {
+                      setError(message(e));
+                    });
+                  }}
+                >
+                  <PixelIcon cells={FOLDER} />
+                </button>
+                <button
+                  type="button"
+                  className={styles.use}
+                  disabled={current}
+                  onClick={() => {
+                    launcher.select(target);
+                    onPlay();
+                  }}
+                >
+                  {current ? "Selected" : "Use"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

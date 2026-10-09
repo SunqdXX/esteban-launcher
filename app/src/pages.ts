@@ -1,4 +1,4 @@
-export const PAGES = ["play", "profiles", "mods", "servers", "settings", "about"] as const;
+export const PAGES = ["play", "profiles", "mods", "skins", "servers", "settings", "about"] as const;
 
 export type PageId = (typeof PAGES)[number];
 
@@ -6,6 +6,7 @@ export const PAGE_LABELS: Record<PageId, string> = {
   play: "Play",
   profiles: "Profiles",
   mods: "Mods",
+  skins: "Skins",
   servers: "Servers",
   settings: "Settings",
   about: "About",

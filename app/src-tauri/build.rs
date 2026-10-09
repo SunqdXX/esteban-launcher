@@ -18,6 +18,15 @@ fn main() {
         "packs",
         "about",
         "open_link",
+        "catalog",
+        "loader_versions",
+        "set_loader_version",
+        "instances",
+        "skins",
+        "import_skin",
+        "update_skin",
+        "remove_skin",
+        "set_skin",
     ]);
     if let Err(error) =
         tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))

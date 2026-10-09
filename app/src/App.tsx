@@ -8,6 +8,7 @@ import ModsPage from "./pages/ModsPage";
 import PlayPage from "./pages/PlayPage";
 import ProfilesPage from "./pages/ProfilesPage";
 import SettingsPage from "./pages/SettingsPage";
+import SkinsPage from "./pages/SkinsPage";
 import { PAGE_LABELS, type PageId } from "./pages";
 import { useLauncher } from "./useLauncher";
 
@@ -36,6 +37,8 @@ export default function App() {
     );
   } else if (page === "mods") {
     content = <ModsPage launcher={launcher} />;
+  } else if (page === "skins") {
+    content = <SkinsPage launcher={launcher} />;
   } else if (page === "settings") {
     content = <SettingsPage launcher={launcher} />;
   } else if (page === "about") {

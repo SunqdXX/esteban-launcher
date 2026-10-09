@@ -3,10 +3,13 @@ import {
   api,
   message,
   onProgress,
+  settle,
+  type Catalog,
   type InstallSummary,
   type InstanceStatus,
   type Overview,
   type Progress,
+  type Release,
   type Selection,
 } from "./api";
 
@@ -14,6 +17,8 @@ export type Outcome = { kind: "ready"; summary: InstallSummary } | { kind: "erro
 
 export interface Launcher {
   overview: Overview | null;
+  catalog: Catalog | null;
+  releases: Release[];
   loadError: string | null;
   selection: Selection | null;
   status: InstanceStatus | null;
@@ -27,10 +32,13 @@ export interface Launcher {
   acceptHacks: () => Promise<boolean>;
   install: (target: Selection) => Promise<void>;
   setMod: (slug: string, enabled: boolean) => Promise<string | null>;
+  setStatus: (next: InstanceStatus) => void;
+  refreshStatus: () => void;
 }
 
 export function useLauncher(): Launcher {
   const [overview, setOverview] = useState<Overview | null>(null);
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [status, setStatus] = useState<InstanceStatus | null>(null);
@@ -63,14 +71,23 @@ export function useLauncher(): Launcher {
       .overview()
       .then((next) => {
         setOverview(next);
-        const first = { gameVersion: next.gameVersion, profile: next.profile };
+        const first = { gameVersion: next.gameVersion, loader: next.loader, hacked: next.hacked };
         setSelection(first);
         loadStatus(first);
       })
       .catch((error: unknown) => {
         setLoadError(message(error));
       });
+    api
+      .catalog(false)
+      .then(setCatalog)
+      .catch((error: unknown) => {
+        setCatalog({ latest: "", releases: [], offline: true });
+        setLoadError(message(error));
+      });
   }, [loadStatus]);
+
+  const releases = catalog?.releases ?? [];
 
   useEffect(() => {
     let stop: (() => void) | null = null;
@@ -102,7 +119,8 @@ export function useLauncher(): Launcher {
   }, []);
 
   const select = useCallback(
-    (next: Selection) => {
+    (wanted: Selection) => {
+      const next = settle(wanted, catalog?.releases ?? [], overview?.pinned ?? []);
       setSelection(next);
       setOutcome(null);
       setStatus(null);
@@ -111,8 +129,12 @@ export function useLauncher(): Launcher {
         setOutcome({ kind: "error", text: message(error) });
       });
     },
-    [loadStatus],
+    [loadStatus, catalog, overview],
   );
+
+  const refreshStatus = useCallback(() => {
+    if (selection) loadStatus(selection);
+  }, [loadStatus, selection]);
 
   const acceptHacks = useCallback(async () => {
     try {
@@ -163,6 +185,8 @@ export function useLauncher(): Launcher {
 
   return {
     overview,
+    catalog,
+    releases,
     loadError,
     selection,
     status,
@@ -176,5 +200,7 @@ export function useLauncher(): Launcher {
     acceptHacks,
     install,
     setMod,
+    setStatus,
+    refreshStatus,
   };
 }

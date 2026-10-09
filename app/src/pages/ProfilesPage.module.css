@@ -26,66 +26,12 @@
   font-size: var(--text-sm);
 }
 
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: var(--space-5);
-}
-
-.card {
-  background: var(--surface-2);
-  border: var(--line) solid var(--border);
-  box-shadow: inset 0 2px 0 var(--venom);
-  padding: var(--space-4);
-}
-
-.card.hacked {
-  box-shadow: inset 0 2px 0 var(--red);
-}
-
-.cardHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-}
-
-.name {
+.empty {
   margin: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-lg);
-  font-weight: 600;
-}
-
-.dot {
-  width: 8px;
-  height: 8px;
-  background: var(--venom);
-}
-
-.hacked .dot {
-  background: var(--red);
-}
-
-.chip {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--text-dim);
+  padding: var(--space-5) var(--space-4);
   border: var(--line) solid var(--border);
-  padding: 2px var(--space-2);
-}
-
-.chipOn {
-  color: var(--purple);
-  border-color: var(--purple);
-}
-
-.text {
-  margin: var(--space-2) 0 var(--space-4);
-  font-size: var(--text-sm);
   color: var(--text-dim);
+  font-size: var(--text-sm);
 }
 
 .rows {
@@ -97,11 +43,21 @@
 
 .row {
   display: grid;
-  grid-template-columns: 64px 44px minmax(0, 1fr) 32px 84px;
+  grid-template-columns: 150px 104px minmax(0, 1fr) minmax(0, 190px) 32px 84px;
   align-items: center;
-  gap: var(--space-2);
-  height: 44px;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: 0 0 0 var(--space-3);
   border-bottom: var(--line) solid var(--border);
+}
+
+.row.columns {
+  min-height: 32px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
 }
 
 .row.current {
@@ -109,8 +65,43 @@
   box-shadow: inset 2px 0 0 var(--purple);
 }
 
+.loader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: var(--text-dim);
+}
+
+.dot.fabric {
+  background: var(--venom);
+}
+
+.dot.forge {
+  background: var(--blue);
+}
+
+.dot.hacked {
+  background: var(--red);
+}
+
+.hackedTag {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--red);
+}
+
 .v {
-  padding-left: var(--space-3);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
   font-weight: 600;
 }
 
@@ -121,6 +112,7 @@
 .tag {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+  font-weight: 400;
   color: var(--text-dim);
 }
 
@@ -130,6 +122,32 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.skin {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.head {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: var(--line) solid var(--border);
+  background: var(--surface-2);
+}
+
+.skinName {
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dim {
+  color: var(--text-dim);
 }
 
 .icon {

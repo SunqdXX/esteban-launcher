@@ -25,10 +25,21 @@
 }
 
 .pick {
-  display: grid;
-  grid-template-columns: 150px 220px;
+  display: flex;
   gap: var(--space-2);
   flex: none;
+}
+
+.pick > :first-child {
+  width: 130px;
+}
+
+.pick > :nth-child(2) {
+  width: 270px;
+}
+
+.pick > :nth-child(3) {
+  width: 190px;
 }
 
 .error {
@@ -171,4 +182,43 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.advanced {
+  margin-top: var(--space-5);
+  border: var(--line) solid var(--border);
+}
+
+.summary {
+  padding: var(--space-3) var(--space-4);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.summary::marker,
+.summary::-webkit-details-marker {
+  color: var(--text-dim);
+}
+
+.advancedBody {
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.buildLabel {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.build {
+  width: 280px;
+}
+
+.hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-dim);
 }

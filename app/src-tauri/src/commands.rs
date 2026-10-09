@@ -1,14 +1,16 @@
 use std::path::PathBuf;
 use std::sync::RwLock;
 
+use esteban_core::catalog::{self, Catalog, LoaderVersions};
 use esteban_core::install::{InstallOptions, install as install_instance};
-use esteban_core::instance::Instance;
+use esteban_core::instance::{self, Instance};
 use esteban_core::launch::jvm;
 use esteban_core::loader::Loader;
 use esteban_core::net::Net;
 use esteban_core::packs::{self, Imported, Linked};
 use esteban_core::paths::Paths;
 use esteban_core::profile::{HACKS_WARNING, Settings};
+use esteban_core::skins::{self, Model, Skin};
 use esteban_core::status::{InstanceStatus, status};
 use esteban_core::versions::{DEFAULT_GAME_VERSION, GameVersion, PINNED_VERSIONS};
 use esteban_core::{java, system};
@@ -25,6 +27,7 @@ pub struct AppState {
     pub paths: RwLock<Paths>,
     pub net: Net,
     pub busy: Mutex<()>,
+    pub catalog: Mutex<Option<Catalog>>,
 }
 
 impl AppState {
@@ -60,7 +63,7 @@ pub struct Selection {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Overview {
-    versions: &'static [GameVersion],
+    pinned: &'static [GameVersion],
     game_version: String,
     loader: Loader,
     hacked: bool,
@@ -109,7 +112,7 @@ pub async fn overview(state: State<'_, AppState>) -> Reply<Overview> {
         && settings.hacks_warning_accepted
         && esteban_core::instance::hacked_allowed(&game_version, loader);
     Ok(Overview {
-        versions: PINNED_VERSIONS,
+        pinned: PINNED_VERSIONS,
         game_version,
         loader,
         hacked,
@@ -222,6 +225,150 @@ pub async fn open_folder(
     app.opener()
         .open_path(instance.dir.to_string_lossy(), None::<&str>)
         .map_err(|e| format!("Could not open {}: {e}", instance.dir.display()))
+}
+
+#[tauri::command]
+pub async fn catalog(state: State<'_, AppState>, refresh: bool) -> Reply<Catalog> {
+    let mut cached = state.catalog.lock().await;
+    if let Some(known) = cached.as_ref().filter(|c| !refresh && !c.offline) {
+        return Ok(known.clone());
+    }
+    let fresh = catalog::load(&state.net, &state.paths())
+        .await
+        .map_err(human)?;
+    cached.replace(fresh.clone());
+    Ok(fresh)
+}
+
+#[tauri::command]
+pub async fn loader_versions(
+    state: State<'_, AppState>,
+    selection: Selection,
+) -> Reply<LoaderVersions> {
+    catalog::loader_versions(
+        &state.net,
+        &state.paths(),
+        &selection.game_version,
+        selection.loader,
+    )
+    .await
+    .map_err(human)
+}
+
+#[tauri::command]
+pub async fn set_loader_version(
+    state: State<'_, AppState>,
+    selection: Selection,
+    version: Option<String>,
+) -> Reply<InstanceStatus> {
+    let instance = instance(&state, &selection)?;
+    if let Some(v) = &version {
+        let choices = catalog::loader_versions(
+            &state.net,
+            &state.paths(),
+            &instance.game_version,
+            instance.loader,
+        )
+        .await
+        .map_err(human)?;
+        if !choices.versions.iter().any(|c| &c.version == v) {
+            return Err(format!(
+                "{v} isn't a {} build for {}.",
+                instance.loader.title(),
+                instance.game_version
+            ));
+        }
+    }
+    instance.set_loader_version(version).await.map_err(human)?;
+    status(&instance).await.map_err(human)
+}
+
+#[tauri::command]
+pub async fn instances(state: State<'_, AppState>) -> Reply<Vec<InstanceStatus>> {
+    let mut out = Vec::new();
+    for found in instance::list(&state.paths()).await.map_err(human)? {
+        out.push(status(&found).await.map_err(human)?);
+    }
+    Ok(out)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkinCard {
+    #[serde(flatten)]
+    skin: Skin,
+    preview: Vec<String>,
+}
+
+async fn card(paths: &Paths, skin: Skin) -> Reply<SkinCard> {
+    let image = skins::image(paths, &skin.id).await.map_err(human)?;
+    let preview = skins::preview(&image, skin.model);
+    Ok(SkinCard { skin, preview })
+}
+
+#[tauri::command]
+pub async fn skins(state: State<'_, AppState>) -> Reply<Vec<SkinCard>> {
+    let paths = state.paths();
+    let mut out = Vec::new();
+    for skin in skins::list(&paths).await.map_err(human)? {
+        out.push(card(&paths, skin).await?);
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn import_skin(app: AppHandle, state: State<'_, AppState>) -> Reply<Option<SkinCard>> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Pick a skin")
+            .add_filter("Skin", &["png"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| format!("The file picker stopped: {e}"))?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
+        return Ok(None);
+    };
+    let paths = state.paths();
+    let skin = skins::import(&paths, &path).await.map_err(human)?;
+    Ok(Some(card(&paths, skin).await?))
+}
+
+#[tauri::command]
+pub async fn update_skin(
+    state: State<'_, AppState>,
+    id: String,
+    name: Option<String>,
+    model: Option<Model>,
+) -> Reply<SkinCard> {
+    let paths = state.paths();
+    let skin = skins::update(&paths, &id, name.as_deref(), model)
+        .await
+        .map_err(human)?;
+    card(&paths, skin).await
+}
+
+#[tauri::command]
+pub async fn remove_skin(state: State<'_, AppState>, id: String) -> Reply<()> {
+    skins::remove(&state.paths(), &id).await.map_err(human)
+}
+
+#[tauri::command]
+pub async fn set_skin(
+    state: State<'_, AppState>,
+    selection: Selection,
+    skin: Option<String>,
+) -> Reply<InstanceStatus> {
+    let paths = state.paths();
+    let instance = instance(&state, &selection)?;
+    if let Some(id) = &skin
+        && skins::find(&paths, id).await.map_err(human)?.is_none()
+    {
+        return Err("That skin isn't in the list anymore.".into());
+    }
+    instance.set_skin(skin).await.map_err(human)?;
+    status(&instance).await.map_err(human)
 }
 
 #[derive(Serialize)]

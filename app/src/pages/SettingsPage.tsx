@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, gigabytes, message, type LauncherSettings, type PackLine, type Selection } from "../api";
+import { api, gigabytes, hackedAllowed, message, settle, type LauncherSettings, type PackLine, type Selection } from "../api";
+import LoaderSwitch from "../components/LoaderSwitch";
 import ModeSwitch from "../components/ModeSwitch";
 import Toggle from "../components/Toggle";
 import VersionPicker from "../components/VersionPicker";
@@ -327,20 +328,31 @@ export default function SettingsPage({ launcher }: SettingsPageProps) {
         </p>
         <div className={styles.target}>
           <VersionPicker
-            versions={overview.versions}
+            releases={launcher.releases}
+            pinned={overview.pinned}
             value={packTarget.gameVersion}
             compact
             onChange={(gameVersion) => {
-              setTarget({ ...packTarget, gameVersion });
+              setTarget(settle({ ...packTarget, gameVersion }, launcher.releases, overview.pinned));
             }}
           />
-          <ModeSwitch
-            value={packTarget.profile}
+          <LoaderSwitch
+            release={launcher.releases.find((r) => r.id === packTarget.gameVersion)}
+            value={packTarget.loader}
             compact
-            onChange={(profile) => {
-              setTarget({ ...packTarget, profile });
+            onChange={(loader) => {
+              setTarget(settle({ ...packTarget, loader }, launcher.releases, overview.pinned));
             }}
           />
+          {hackedAllowed(packTarget, overview.pinned) && (
+            <ModeSwitch
+              hacked={packTarget.hacked}
+              compact
+              onChange={(hacked) => {
+                setTarget({ ...packTarget, hacked });
+              }}
+            />
+          )}
         </div>
         <div className={styles.buttons}>
           <button

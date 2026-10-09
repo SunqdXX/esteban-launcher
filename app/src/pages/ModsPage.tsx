@@ -1,5 +1,7 @@
-import { useState } from "react";
-import { api, message } from "../api";
+import { useEffect, useState } from "react";
+import { LOADER_LABEL, api, hackedAllowed, message, sameSelection, type LoaderVersions } from "../api";
+import Dropdown from "../components/Dropdown";
+import LoaderSwitch from "../components/LoaderSwitch";
 import ModeSwitch from "../components/ModeSwitch";
 import PixelIcon, { FOLDER } from "../components/PixelIcon";
 import Toggle from "../components/Toggle";
@@ -12,11 +14,82 @@ interface ModsPageProps {
   launcher: Launcher;
 }
 
+function LoaderBuild({ launcher }: ModsPageProps) {
+  const { selection, status, installing } = launcher;
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState<{ key: string; choices: LoaderVersions | null; error: string | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const busy = sameSelection(installing, selection);
+  const key = selection ? `${selection.loader}-${selection.gameVersion}` : "";
+
+  useEffect(() => {
+    if (!open || !selection || selection.loader === "vanilla") return;
+    let cancelled = false;
+    api
+      .loaderVersions(selection)
+      .then((next) => {
+        if (!cancelled) setLoaded({ key, choices: next, error: null });
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setLoaded({ key, choices: null, error: message(e) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, selection, key]);
+
+  const choices = loaded?.key === key ? loaded.choices : null;
+  const loadError = loaded?.key === key ? loaded.error : null;
+  if (!selection || !status || selection.loader === "vanilla") return null;
+  const name = LOADER_LABEL[selection.loader];
+  const value = status.loaderPinned ? (status.loaderVersion ?? "") : "";
+
+  return (
+    <details
+      className={styles.advanced}
+      onToggle={(e) => {
+        setOpen(e.currentTarget.open);
+      }}
+    >
+      <summary className={styles.summary}>Advanced</summary>
+      <div className={styles.advancedBody}>
+        <p className={styles.buildLabel}>{name} build</p>
+        <div className={styles.build}>
+          <Dropdown
+            label={`${name} build`}
+            value={value}
+            disabled={!choices || busy}
+            options={[
+              { value: "", label: "Latest stable", note: choices?.default ?? null },
+              ...(choices?.versions ?? []).map((v) => ({ value: v.version, label: v.label, note: v.stable ? "stable" : null })),
+            ]}
+            onChange={(picked) => {
+              setError(null);
+              api
+                .setLoaderVersion(selection, picked === "" ? null : picked)
+                .then(launcher.setStatus)
+                .catch((err: unknown) => {
+                  setError(message(err));
+                });
+            }}
+          />
+        </div>
+        <p className={styles.hint}>
+          {choices?.note ?? `The newest stable ${name} build is picked when nothing is set.`} A change applies on the next Play.
+        </p>
+        {(error ?? loadError) && <p className={styles.error}>{error ?? loadError}</p>}
+      </div>
+    </details>
+  );
+}
+
 export default function ModsPage({ launcher }: ModsPageProps) {
   const { overview, selection, status, installing } = launcher;
   const [error, setError] = useState<string | null>(null);
   if (!overview || !selection) return null;
-  const busy = installing?.gameVersion === selection.gameVersion && installing.profile === selection.profile;
+  const busy = sameSelection(installing, selection);
+  const release = launcher.releases.find((r) => r.id === selection.gameVersion);
+  const vanilla = selection.loader === "vanilla";
 
   return (
     <div className={styles.page}>
@@ -27,7 +100,8 @@ export default function ModsPage({ launcher }: ModsPageProps) {
         </div>
         <div className={styles.pick}>
           <VersionPicker
-            versions={overview.versions}
+            releases={launcher.releases}
+            pinned={overview.pinned}
             value={selection.gameVersion}
             compact
             onChange={(gameVersion) => {
@@ -35,18 +109,30 @@ export default function ModsPage({ launcher }: ModsPageProps) {
               launcher.select({ ...selection, gameVersion });
             }}
           />
-          <ModeSwitch
-            value={selection.profile}
+          <LoaderSwitch
+            release={release}
+            value={selection.loader}
             compact
-            onChange={(profile) => {
+            onChange={(loader) => {
               setError(null);
-              launcher.select({ ...selection, profile });
+              launcher.select({ ...selection, loader });
             }}
           />
+          {hackedAllowed(selection, overview.pinned) && (
+            <ModeSwitch
+              hacked={selection.hacked}
+              compact
+              onChange={(hacked) => {
+                setError(null);
+                launcher.select({ ...selection, hacked });
+              }}
+            />
+          )}
         </div>
       </header>
       {error && <p className={styles.error}>{error}</p>}
-      {status && !status.installed && (
+      {vanilla && <p className={styles.banner}>Vanilla runs without mods. Pick Fabric or Forge to use some.</p>}
+      {!vanilla && status && !status.installed && (
         <p className={styles.banner}>Not installed yet. Toggles still work, the first Play picks the builds.</p>
       )}
       <ul className={styles.list}>
@@ -93,7 +179,19 @@ export default function ModsPage({ launcher }: ModsPageProps) {
             <span className={cx(styles.badge, extra.hacks && styles.redBadge)}>{extra.hacks ? "Hacked only" : "Ours"}</span>
           </li>
         ))}
+        {!vanilla && status && (
+          <li className={styles.row}>
+            <div className={styles.what}>
+              <span className={styles.name}>CustomSkinLoader</span>
+              <span className={cx(styles.state, status.skinNote && styles.skipped)}>
+                {status.skinNote ?? status.skinMod ?? "Picked on the first Play"}
+              </span>
+            </div>
+            <span className={styles.badge}>Shows your skin</span>
+          </li>
+        )}
       </ul>
+      {!vanilla && <LoaderBuild launcher={launcher} />}
       {status && status.unmanaged.length > 0 && (
         <section className={styles.extra}>
           <h2 className={styles.h2}>Added by you</h2>
