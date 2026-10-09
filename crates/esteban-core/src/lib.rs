@@ -21,9 +21,11 @@ pub mod packs;
 pub mod paths;
 pub mod profile;
 pub mod progress;
+pub mod signing;
 pub mod skins;
 pub mod status;
 pub mod system;
+pub mod update;
 pub mod versions;
 
 pub use error::{Error, Result};

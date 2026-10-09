@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::channel;
 use crate::download::{self, Download, Stats};
 use crate::error::IoContext;
 use crate::esteban;
@@ -147,6 +148,12 @@ pub async fn install(
     let loader = match instance.loader {
         Loader::Vanilla => LaunchProfile::vanilla(&version),
         Loader::Fabric => {
+            if crate::versions::is_pinned(&game) {
+                let report = channel::refresh(net, paths).await?;
+                if let Some(notice) = &report.notice {
+                    progress.notice(notice);
+                }
+            }
             instance.ensure_custom_backgrounds().await?;
             let loader_version = match (&file.loader.version, file.loader.pinned, options.update) {
                 (Some(chosen), true, _) | (Some(chosen), false, false) => chosen.clone(),

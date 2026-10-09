@@ -91,6 +91,7 @@ fn main() {
             commands::update_skin,
             commands::remove_skin,
             commands::set_skin,
+            commands::release_status,
         ])
         .run(tauri::generate_context!());
     if let Err(error) = result {

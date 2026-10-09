@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, message, type About, type Coin } from "../api";
+import { api, message, type About, type Coin, type ReleaseStatus, type UpdateCheck } from "../api";
 import logoUrl from "../assets/logo/EstebanLogo.png";
 import styles from "./AboutPage.module.css";
 
@@ -57,6 +57,79 @@ function CoinCard({ coin }: { coin: Coin }) {
         </>
       )}
     </div>
+  );
+}
+
+function updateLine(update: UpdateCheck): { text: string; good: boolean } {
+  switch (update.kind) {
+    case "noKey":
+      return { text: "Updates aren't checked yet: no updater key is built into this launcher.", good: false };
+    case "nothingPublished":
+      return { text: "No launcher update has been published yet.", good: true };
+    case "offline":
+      return { text: "Couldn't reach GitHub to check for updates.", good: false };
+    case "upToDate":
+      return { text: `Up to date. The newest release is ${update.latest}.`, good: true };
+    case "available":
+      return { text: `Launcher ${update.version} is out, signature checked (key ${update.keyId}).${update.notes ? ` ${update.notes}` : ""}`, good: true };
+    case "refused":
+      return { text: update.reason, good: false };
+  }
+}
+
+function channelLine(status: ReleaseStatus): string {
+  const c = status.channel;
+  const from =
+    c.source === "github"
+      ? `from GitHub, signed by key ${c.keyId ?? ""}`
+      : c.source === "saved"
+        ? `the last signed copy on this computer (key ${c.keyId ?? ""})`
+        : "the list built into this launcher";
+  return `Esteban version list ${String(c.sequence)}: ${from}. Expires ${c.expires.slice(0, 10)}.`;
+}
+
+function Updates() {
+  const [status, setStatus] = useState<ReleaseStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(true);
+
+  const load = () => {
+    api
+      .releaseStatus()
+      .then((next) => {
+        setStatus(next);
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        setError(message(e));
+      })
+      .finally(() => {
+        setChecking(false);
+      });
+  };
+
+  const check = () => {
+    setChecking(true);
+    load();
+  };
+
+  useEffect(load, []);
+
+  const line = status ? updateLine(status.update) : null;
+  return (
+    <section className={styles.section}>
+      <h2 className={styles.h2}>Updates</h2>
+      <ul className={styles.facts}>
+        <li>{checking && !status ? "Checking" : line ? <span className={line.good ? undefined : styles.dim}>{line.text}</span> : null}</li>
+        {status && <li>{channelLine(status)}</li>}
+        {status?.channel.notice && <li className={styles.bad}>{status.channel.notice}</li>}
+      </ul>
+      {error && <p className={styles.bad}>{error}</p>}
+      <p className={styles.dim}>Both are checked against signing keys built into the launcher before anything in them is used.</p>
+      <button type="button" className={styles.link} disabled={checking} onClick={check}>
+        {checking ? "Checking" : "Check again"}
+      </button>
+    </section>
   );
 }
 
@@ -137,6 +210,8 @@ export default function AboutPage() {
           </button>
         </div>
       </section>
+
+      <Updates />
 
       <section className={styles.section}>
         <h2 className={styles.h2}>Support</h2>

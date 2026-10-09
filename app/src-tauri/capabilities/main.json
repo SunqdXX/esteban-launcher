@@ -39,6 +39,7 @@
     "allow-import-skin",
     "allow-update-skin",
     "allow-remove-skin",
-    "allow-set-skin"
+    "allow-set-skin",
+    "allow-release-status"
   ]
 }

@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 
 use esteban_core::catalog::{self, Catalog, LoaderVersions};
+use esteban_core::channel::{self, ChannelReport};
 use esteban_core::install::{InstallOptions, install as install_instance};
 use esteban_core::instance::{self, Instance};
 use esteban_core::launch::jvm;
@@ -12,6 +13,7 @@ use esteban_core::paths::Paths;
 use esteban_core::profile::{HACKS_WARNING, Settings};
 use esteban_core::skins::{self, Model, Skin};
 use esteban_core::status::{InstanceStatus, status};
+use esteban_core::update::{self, UpdateCheck};
 use esteban_core::versions::{DEFAULT_GAME_VERSION, GameVersion, PINNED_VERSIONS};
 use esteban_core::{java, system};
 use serde::{Deserialize, Serialize};
@@ -290,6 +292,27 @@ pub async fn instances(state: State<'_, AppState>) -> Reply<Vec<InstanceStatus>>
         out.push(status(&found).await.map_err(human)?);
     }
     Ok(out)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseStatus {
+    launcher: &'static str,
+    channel: ChannelReport,
+    update: UpdateCheck,
+}
+
+#[tauri::command]
+pub async fn release_status(state: State<'_, AppState>) -> Reply<ReleaseStatus> {
+    let channel = channel::refresh(&state.net, &state.paths())
+        .await
+        .map_err(human)?;
+    let update = update::check(&state.net).await;
+    Ok(ReleaseStatus {
+        launcher: esteban_core::VERSION,
+        channel,
+        update,
+    })
 }
 
 #[derive(Serialize)]

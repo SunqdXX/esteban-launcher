@@ -7,6 +7,7 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand};
 use esteban_core::account::{Secret, Session};
 use esteban_core::catalog;
+use esteban_core::channel::{self, Source};
 use esteban_core::install::{InstallOptions, Installed, install};
 use esteban_core::instance::Instance;
 use esteban_core::launch::{self, QuickPlay, Smoke};
@@ -17,6 +18,7 @@ use esteban_core::packs::{self, Imported, Linked};
 use esteban_core::paths::Paths;
 use esteban_core::profile::{HACKS_WARNING, Settings};
 use esteban_core::skins::{self, Applied, Model};
+use esteban_core::update::{self, UpdateCheck};
 use esteban_core::{DISCLAIMER, Error};
 
 use crate::progress::CliProgress;
@@ -65,6 +67,10 @@ enum Command {
         about = "Your skin library and the skin each instance shows"
     )]
     Skin(SkinCommand),
+    #[command(about = "Fetch and check the signed Esteban version list")]
+    Channel,
+    #[command(about = "Check for a signed launcher update")]
+    Update,
 }
 
 #[derive(Subcommand)]
@@ -300,6 +306,11 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         Command::Packs(PacksCommand::Link(source)) => link_packs(&paths, &source).await,
         Command::Packs(PacksCommand::Import(source)) => import_packs(&paths, &source).await,
         Command::Skin(command) => skin_command(&paths, command).await,
+        Command::Channel => show_channel(&net, &paths).await,
+        Command::Update => {
+            println!("{}", update_line(&update::check(&net).await));
+            Ok(())
+        }
         Command::Versions => list_versions(&net, &paths).await,
         Command::Loaders(selector) => list_loaders(&net, &paths, &selector).await,
         Command::LoaderVersion(pick) => pick_loader(&net, &paths, &pick).await,
@@ -311,6 +322,51 @@ async fn run(cli: Cli) -> Result<(), Failure> {
             }
             Ok(())
         }
+    }
+}
+
+async fn show_channel(net: &Net, paths: &Paths) -> Result<(), Failure> {
+    let report = channel::refresh(net, paths).await?;
+    let source = match report.source {
+        Source::Bundled => "the list built into this launcher",
+        Source::Github => "GitHub, signature checked",
+        Source::Saved => "the last checked copy saved on this computer",
+    };
+    println!("Esteban version list {} from {source}", report.sequence);
+    println!("  issued {}, expires {}", report.issued, report.expires);
+    match &report.key_id {
+        Some(id) => println!("  signed by key {id}"),
+        None if report.keys == 0 => {
+            println!("  no channel key is built in yet, so only the built-in list is used")
+        }
+        None => println!("  nothing newer is published, so the built-in list is used"),
+    }
+    if let Some(notice) = &report.notice {
+        println!("  {notice}");
+    }
+    Ok(())
+}
+
+fn update_line(check: &UpdateCheck) -> String {
+    match check {
+        UpdateCheck::NoKey => {
+            "No updater key is built into this launcher yet, so updates aren't checked.".into()
+        }
+        UpdateCheck::NothingPublished => "No launcher update has been published.".into(),
+        UpdateCheck::Offline => "Couldn't reach GitHub to check for updates.".into(),
+        UpdateCheck::UpToDate { latest } => format!("Up to date (latest is {latest})."),
+        UpdateCheck::Available {
+            version,
+            notes,
+            key_id,
+        } => {
+            let mut line = format!("Launcher {version} is out, signature checked (key {key_id}).");
+            if !notes.is_empty() {
+                line.push_str(&format!(" {notes}"));
+            }
+            line
+        }
+        UpdateCheck::Refused { reason } => format!("Update info refused: {reason}"),
     }
 }
 

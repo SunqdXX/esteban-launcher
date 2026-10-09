@@ -73,6 +73,30 @@ export interface Coin {
   qr: string[];
 }
 
+export interface ChannelReport {
+  source: "bundled" | "github" | "saved";
+  sequence: number;
+  issued: string;
+  expires: string;
+  keyId: string | null;
+  keys: number;
+  notice: string | null;
+}
+
+export type UpdateCheck =
+  | { kind: "noKey" }
+  | { kind: "nothingPublished" }
+  | { kind: "offline" }
+  | { kind: "upToDate"; latest: string }
+  | { kind: "available"; version: string; notes: string; keyId: string }
+  | { kind: "refused"; reason: string };
+
+export interface ReleaseStatus {
+  launcher: string;
+  channel: ChannelReport;
+  update: UpdateCheck;
+}
+
 export interface About {
   version: string;
   disclaimer: string;
@@ -189,6 +213,7 @@ export const api = {
   setDataDir: (path: string | null) => invoke<string>("set_data_dir", { path }),
   packs: (action: "link" | "import", from: string, s: Selection) => invoke<PackLine[]>("packs", { action, from, ...wire(s) }),
   about: () => invoke<About>("about"),
+  releaseStatus: () => invoke<ReleaseStatus>("release_status"),
   openLink: (which: "github" | "esteban" | "discord") => invoke<null>("open_link", { which }),
 };
 

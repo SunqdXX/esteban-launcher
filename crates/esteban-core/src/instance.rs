@@ -276,9 +276,9 @@ impl Instance {
         self.extra_artifacts()
             .into_iter()
             .map(|artifact| Download {
-                url: artifact.url.to_string(),
-                dest: self.mods_dir().join(artifact.filename),
-                hash: Hash::sha256(artifact.sha256),
+                dest: self.mods_dir().join(&artifact.filename),
+                hash: Hash::sha256(&artifact.sha256),
+                url: artifact.url,
                 size: Some(artifact.size),
                 executable: false,
             })
@@ -724,7 +724,7 @@ mod tests {
                 clean
                     .extra_artifacts()
                     .iter()
-                    .all(|a| !esteban::is_known_hacks_jar(a.sha256))
+                    .all(|a| !esteban::is_known_hacks_jar(&a.sha256))
             );
             let hacked = Instance::new(&paths, version.id, Loader::Fabric, true).unwrap();
             let kinds: Vec<_> = hacked.extra_artifacts().iter().map(|a| a.kind).collect();
@@ -905,7 +905,7 @@ mod tests {
         let old = ModLock {
             game_version: "1.21.4".into(),
             mods: vec![resolved("sodium")],
-            extras: vec![hud.filename.into(), "esteban-1.3.0+1.21.4.jar".into()],
+            extras: vec![hud.filename.clone(), "esteban-1.3.0+1.21.4.jar".into()],
             skipped: vec![Skipped {
                 title: "Iris Shaders".into(),
                 message: "off".into(),
@@ -921,7 +921,7 @@ mod tests {
         assert_eq!(file.loader.version.as_deref(), Some("0.19.5"));
         assert!(file.hacked && file.installed);
         assert_eq!(file.jars.len(), 3);
-        assert_eq!(file.jars[1].sha256.as_deref(), Some(hud.sha256));
+        assert_eq!(file.jars[1].sha256.as_deref(), Some(hud.sha256.as_str()));
         assert!(file.jars[2].sha256.is_none());
         let lock = file.lock().unwrap();
         assert_eq!(lock.mods, vec![resolved("sodium")]);

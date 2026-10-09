@@ -184,3 +184,8 @@
 .bad {
   color: var(--red);
 }
+
+.dim {
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+}

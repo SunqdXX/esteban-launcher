@@ -105,7 +105,8 @@ Every file download carries a hash. The `Download` type has no way to leave it o
 | Forge installer | the `.sha512` (or `.sha256`, `.sha1`) next to it on Forge's maven |
 | Forge libraries and setup outputs | sha1 from the installer. Old installers: Forge's listed sha1s, Mojang's hash, or the `.sha1` next to the file (see [Forge](#forge)) |
 | Modrinth mods | sha512 from the Modrinth version |
-| Hacks jar | sha256 pinned in the launcher (signed `versions.json` from M5) |
+| Esteban jars (HUD, hacks) | sha256 from `versions.json`: the signed list from GitHub when it passes its checks, otherwise the one compiled in (see [Update channel](update-channel.md)) |
+| `versions.json`, `latest.json` | minisign signature against the public keys compiled in from `config/keys.json` |
 
 Not hash-checked, because no source publishes a hash for them: Mojang's version manifest and runtime index, Fabric Meta answers, Modrinth API answers, Forge's version list and recommended builds. They are fetched over HTTPS from the [allowed hosts](network.md) only. The Fabric `.sha256` files come from the same host as the jar, so they catch corruption but not a compromised Maven.
 

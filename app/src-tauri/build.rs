@@ -27,6 +27,7 @@ fn main() {
         "update_skin",
         "remove_skin",
         "set_skin",
+        "release_status",
     ]);
     if let Err(error) =
         tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))

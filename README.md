@@ -33,9 +33,13 @@ sign in isnt built yet tho, it waits on mojang approving the app
 - no ads, no telemetry, no accounts of our own. it only talks to the hosts listed in [docs/network.md](docs/network.md)
 - non-commercial, nothing is for sale
 
+## signed releases
+
+the list of esteban jars (`versions.json`) and the launcher update info (`latest.json`) are signed. the launcher only trusts them if the signature matches a public key built into it, the list isnt older than one it already saw, and it hasnt expired. how it works and how releases get signed: [docs/update-channel.md](docs/update-channel.md)
+
 ## planned
 
-- signed updates: the update list gets signed and every jar is checked against it before anything installs
+- installers and installing updates from inside the launcher
 - voluntary crypto donations, never needed for anything
 
 ## build
@@ -57,6 +61,8 @@ cargo run -p esteban-cli -- install --version 1.20.1 --loader forge
 cargo run -p esteban-cli -- versions
 cargo run -p esteban-cli -- loaders --version 1.20.1 --loader forge
 cargo run -p esteban-cli -- skin add ~/skins/mine.png
+cargo run -p esteban-cli -- channel
+cargo run -p esteban-cli -- update
 cargo run -p esteban-cli -- plan --version 1.21.4 --hacked
 cargo run -p esteban-cli -- mods list --version 1.21.4
 cargo run -p esteban-cli -- mods disable iris --version 1.21.4

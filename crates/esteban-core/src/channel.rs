@@ -1,17 +1,24 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::LazyLock;
+use std::path::PathBuf;
+use std::sync::{Arc, LazyLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 
 use crate::esteban::{HACKS_MOD_ID, HUD_MOD_ID};
 use crate::loader::Loader;
-use crate::{Error, Result};
+use crate::net::Net;
+use crate::paths::Paths;
+use crate::signing::{self, Purpose, Verified};
+use crate::{Error, Result, fsx};
 
 pub const CHANNEL_SCHEMA: u32 = 2;
 
 const BUNDLED: &str = include_str!("../../../config/versions.json");
 
 const JAR_HOST: &str = "https://github.com/SunqdXX/esteban/releases/download/";
+
+pub const CHANNEL_URL: &str =
+    "https://github.com/SunqdXX/esteban/releases/latest/download/versions.json";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -69,6 +76,12 @@ impl Channel {
                 "has schema {}, this launcher reads {CHANNEL_SCHEMA}",
                 self.schema
             ));
+        }
+        if !is_timestamp(&self.issued) || !is_timestamp(&self.expires) {
+            return bad("has dates that aren't YYYY-MM-DDTHH:MM:SSZ".into());
+        }
+        if self.expires <= self.issued {
+            return bad("expires before it was issued".into());
         }
         let mut seen = BTreeSet::new();
         for build in &self.builds {
@@ -145,17 +158,258 @@ fn is_sha256(text: &str) -> bool {
             .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
 }
 
-static BUNDLED_CHANNEL: LazyLock<Option<Channel>> =
+pub fn is_timestamp(text: &str) -> bool {
+    let b = text.as_bytes();
+    b.len() == 20
+        && b.iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            10 => *c == b'T',
+            13 | 16 => *c == b':',
+            19 => *c == b'Z',
+            _ => c.is_ascii_digit(),
+        })
+}
+
+pub fn utc_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    utc_from_secs(secs)
+}
+
+pub fn utc_from_secs(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rest = secs % 86_400;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rest / 3600,
+        rest % 3600 / 60,
+        rest % 60
+    )
+}
+
+static BUNDLED_CHANNEL: LazyLock<Option<Arc<Channel>>> =
     LazyLock::new(|| match Channel::parse(BUNDLED.as_bytes()) {
-        Ok(channel) => Some(channel),
+        Ok(channel) => Some(Arc::new(channel)),
         Err(e) => {
             tracing::error!(error = %e, "the bundled Esteban version list is broken");
             None
         }
     });
 
-pub fn bundled() -> Option<&'static Channel> {
-    BUNDLED_CHANNEL.as_ref()
+static ACTIVE: RwLock<Option<Arc<Channel>>> = RwLock::new(None);
+
+pub fn bundled() -> Option<Arc<Channel>> {
+    BUNDLED_CHANNEL.clone()
+}
+
+pub fn current() -> Option<Arc<Channel>> {
+    let active = match ACTIVE.read() {
+        Ok(guard) => guard.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    };
+    active.or_else(bundled)
+}
+
+fn set_current(channel: Arc<Channel>) {
+    match ACTIVE.write() {
+        Ok(mut guard) => guard.replace(channel),
+        Err(poisoned) => poisoned.into_inner().replace(channel),
+    };
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Source {
+    Bundled,
+    Github,
+    Saved,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelReport {
+    pub source: Source,
+    pub sequence: u64,
+    pub issued: String,
+    pub expires: String,
+    pub key_id: Option<String>,
+    pub keys: usize,
+    pub notice: Option<String>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct State {
+    #[serde(default)]
+    highest: u64,
+}
+
+fn state_path(paths: &Paths) -> PathBuf {
+    paths.home().join("channel-state.json")
+}
+
+fn saved_list(paths: &Paths) -> PathBuf {
+    paths.cache().join("channel").join("versions.json")
+}
+
+fn saved_signature(paths: &Paths) -> PathBuf {
+    paths.cache().join("channel").join("versions.json.minisig")
+}
+
+async fn read_state(paths: &Paths) -> State {
+    match tokio::fs::read(state_path(paths)).await {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        Err(_) => State::default(),
+    }
+}
+
+async fn write_state(paths: &Paths, state: &State) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(state).map_err(|source| Error::Json {
+        what: "the channel state".into(),
+        source,
+    })?;
+    fsx::write_atomic(&state_path(paths), &bytes).await
+}
+
+async fn read_saved(paths: &Paths) -> Option<(Vec<u8>, String)> {
+    let list = tokio::fs::read(saved_list(paths)).await.ok()?;
+    let signature = tokio::fs::read_to_string(saved_signature(paths))
+        .await
+        .ok()?;
+    Some((list, signature))
+}
+
+pub fn accept(
+    bytes: &[u8],
+    signature: &str,
+    floor: u64,
+    now: &str,
+    keys: &[String],
+) -> Result<(Channel, Verified)> {
+    let verified = signing::verify_with(keys, Purpose::Channel, bytes, signature)?;
+    let channel = Channel::parse(bytes)?;
+    if channel.sequence < floor {
+        return Err(Error::Guard(format!(
+            "The Esteban version list on GitHub is older (sequence {}) than one this launcher already trusted ({floor}), so it was ignored.",
+            channel.sequence
+        )));
+    }
+    if channel.expires.as_str() <= now {
+        return Err(Error::Guard(format!(
+            "The Esteban version list expired on {}, so it was ignored.",
+            &channel.expires[..10]
+        )));
+    }
+    Ok((channel, verified))
+}
+
+enum Fetched {
+    Got(Vec<u8>, String),
+    NotPublished,
+    Unreachable,
+}
+
+async fn fetch(net: &Net, url: &str) -> Fetched {
+    let list = match net.bytes(url).await {
+        Ok(bytes) => bytes.to_vec(),
+        Err(Error::Status { status: 404, .. }) => return Fetched::NotPublished,
+        Err(e) => {
+            tracing::info!(error = %e, "the Esteban version list couldn't be fetched");
+            return Fetched::Unreachable;
+        }
+    };
+    let signature = match net.bytes(&format!("{url}.minisig")).await {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(Error::Status { status: 404, .. }) => String::new(),
+        Err(_) => return Fetched::Unreachable,
+    };
+    Fetched::Got(list, signature)
+}
+
+pub async fn refresh(net: &Net, paths: &Paths) -> Result<ChannelReport> {
+    let (channel, report) = refresh_with(
+        net,
+        paths,
+        CHANNEL_URL,
+        signing::built_in(Purpose::Channel),
+        &utc_now(),
+    )
+    .await?;
+    set_current(channel);
+    Ok(report)
+}
+
+pub async fn refresh_with(
+    net: &Net,
+    paths: &Paths,
+    url: &str,
+    keys: &[String],
+    now: &str,
+) -> Result<(Arc<Channel>, ChannelReport)> {
+    let built_in = bundled()
+        .ok_or_else(|| Error::Guard("The built-in Esteban version list is broken.".into()))?;
+    let mut state = read_state(paths).await;
+    let floor = state.highest.max(built_in.sequence);
+    let mut notice = None;
+    let mut chosen: Option<(Arc<Channel>, Source, Verified)> = None;
+    if !keys.is_empty() {
+        match fetch(net, url).await {
+            Fetched::Got(bytes, signature) => match accept(&bytes, &signature, floor, now, keys) {
+                Ok((channel, verified)) => {
+                    fsx::write_atomic(&saved_list(paths), &bytes).await?;
+                    fsx::write_atomic(&saved_signature(paths), signature.as_bytes()).await?;
+                    chosen = Some((Arc::new(channel), Source::Github, verified));
+                }
+                Err(e) => notice = Some(e.to_string()),
+            },
+            Fetched::NotPublished | Fetched::Unreachable => {}
+        }
+        if chosen.is_none()
+            && let Some((bytes, signature)) = read_saved(paths).await
+        {
+            match accept(&bytes, &signature, floor, now, keys) {
+                Ok((channel, verified)) => {
+                    chosen = Some((Arc::new(channel), Source::Saved, verified));
+                }
+                Err(e) => tracing::warn!(error = %e, "the saved Esteban version list isn't usable"),
+            }
+        }
+    }
+    let (channel, source, key_id) = match chosen {
+        Some((channel, source, verified)) => {
+            if channel.sequence > state.highest {
+                state.highest = channel.sequence;
+                write_state(paths, &state).await?;
+            }
+            (channel, source, Some(verified.key_id))
+        }
+        None => (built_in, Source::Bundled, None),
+    };
+    let report = ChannelReport {
+        source,
+        sequence: channel.sequence,
+        issued: channel.issued.clone(),
+        expires: channel.expires.clone(),
+        key_id,
+        keys: keys.len(),
+        notice,
+    };
+    Ok((channel, report))
+}
+
+pub fn known_hacks_jar(sha256: &str) -> bool {
+    bundled().is_some_and(|c| c.is_known_hacks_jar(sha256))
+        || current().is_some_and(|c| c.is_known_hacks_jar(sha256))
 }
 
 #[cfg(test)]
@@ -231,6 +485,137 @@ mod tests {
         ];
         for (index, edit) in cases.into_iter().enumerate() {
             assert!(with(edit).is_err(), "case {index} was accepted");
+        }
+    }
+
+    #[test]
+    fn dates_come_out_in_the_list_format() {
+        assert_eq!(utc_from_secs(0), "1970-01-01T00:00:00Z");
+        assert_eq!(utc_from_secs(1_791_553_507), "2026-10-09T13:45:07Z");
+        assert_eq!(utc_from_secs(1_709_251_199), "2024-02-29T23:59:59Z");
+        assert_eq!(utc_from_secs(951_868_800), "2000-03-01T00:00:00Z");
+        assert!(is_timestamp(&utc_now()));
+        assert!(!is_timestamp("2026-10-09 13:45:07Z") && !is_timestamp("2026-10-09T13:45:07"));
+    }
+
+    mod remote {
+        use wiremock::matchers::path;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        use super::*;
+        use crate::net::Policy;
+        use crate::signing::tests::TestKey;
+
+        const NOW: &str = "2026-10-09T12:00:00Z";
+
+        fn list(sequence: u64, issued: &str, expires: &str) -> Vec<u8> {
+            let mut value: serde_json::Value = serde_json::from_str(BUNDLED).unwrap();
+            value["sequence"] = sequence.into();
+            value["issued"] = issued.into();
+            value["expires"] = expires.into();
+            serde_json::to_vec_pretty(&value).unwrap()
+        }
+
+        fn fresh(sequence: u64) -> Vec<u8> {
+            list(sequence, "2026-10-09T00:00:00Z", "2099-01-01T00:00:00Z")
+        }
+
+        async fn serve(body: Option<&[u8]>, signature: Option<&str>) -> MockServer {
+            let server = MockServer::start().await;
+            let list = match body {
+                Some(b) => ResponseTemplate::new(200).set_body_bytes(b.to_vec()),
+                None => ResponseTemplate::new(404),
+            };
+            let sig = match signature {
+                Some(s) => ResponseTemplate::new(200).set_body_string(s.to_string()),
+                None => ResponseTemplate::new(404),
+            };
+            Mock::given(path("/versions.json"))
+                .respond_with(list)
+                .mount(&server)
+                .await;
+            Mock::given(path("/versions.json.minisig"))
+                .respond_with(sig)
+                .mount(&server)
+                .await;
+            server
+        }
+
+        #[tokio::test]
+        async fn only_signed_newer_unexpired_lists_are_trusted() {
+            let dir = tempfile::tempdir().unwrap();
+            let paths = Paths::new(dir.path());
+            let net = Net::new(Policy::local_test()).unwrap();
+            let key = TestKey::new();
+            let keys = vec![key.public.clone()];
+            let url = |server: &MockServer| format!("{}/versions.json", server.uri());
+
+            let five = fresh(5);
+            let server = serve(Some(&five), Some(&key.sign(&five, "seq 5"))).await;
+            let (channel, report) = refresh_with(&net, &paths, &url(&server), &keys, NOW)
+                .await
+                .unwrap();
+            assert_eq!(report.source, Source::Github);
+            assert_eq!(channel.sequence, 5);
+            assert!(report.notice.is_none());
+            assert_eq!(report.key_id, signing::key_id(&key.public));
+            assert!(saved_list(&paths).is_file() && saved_signature(&paths).is_file());
+            assert_eq!(read_state(&paths).await.highest, 5);
+
+            let gone = serve(None, None).await;
+            let (channel, report) = refresh_with(&net, &paths, &url(&gone), &keys, NOW)
+                .await
+                .unwrap();
+            assert_eq!((report.source, channel.sequence), (Source::Saved, 5));
+
+            let three = fresh(3);
+            let old = serve(Some(&three), Some(&key.sign(&three, "seq 3"))).await;
+            let (channel, report) = refresh_with(&net, &paths, &url(&old), &keys, NOW)
+                .await
+                .unwrap();
+            assert_eq!(channel.sequence, 5);
+            assert!(report.notice.unwrap().contains("older (sequence 3)"));
+
+            let stale = list(9, "2019-01-01T00:00:00Z", "2020-01-01T00:00:00Z");
+            let expired = serve(Some(&stale), Some(&key.sign(&stale, "seq 9"))).await;
+            let (channel, report) = refresh_with(&net, &paths, &url(&expired), &keys, NOW)
+                .await
+                .unwrap();
+            assert_eq!(channel.sequence, 5);
+            assert!(report.notice.unwrap().contains("expired on 2020-01-01"));
+
+            let seven = fresh(7);
+            let stranger = TestKey::new();
+            let forged = serve(Some(&seven), Some(&stranger.sign(&seven, "seq 7"))).await;
+            let (channel, report) = refresh_with(&net, &paths, &url(&forged), &keys, NOW)
+                .await
+                .unwrap();
+            assert_eq!(channel.sequence, 5);
+            assert!(report.notice.unwrap().contains("isn't signed by a key"));
+
+            let unsigned = serve(Some(&seven), None).await;
+            let (channel, report) = refresh_with(&net, &paths, &url(&unsigned), &keys, NOW)
+                .await
+                .unwrap();
+            assert_eq!(channel.sequence, 5);
+            assert!(report.notice.is_some());
+            assert_eq!(read_state(&paths).await.highest, 5);
+        }
+
+        #[tokio::test]
+        async fn without_a_built_in_key_only_the_compiled_in_list_is_used() {
+            let dir = tempfile::tempdir().unwrap();
+            let paths = Paths::new(dir.path());
+            let net = Net::new(Policy::local_test()).unwrap();
+            let key = TestKey::new();
+            let five = fresh(5);
+            let server = serve(Some(&five), Some(&key.sign(&five, "seq 5"))).await;
+            let url = format!("{}/versions.json", server.uri());
+            let (channel, report) = refresh_with(&net, &paths, &url, &[], NOW).await.unwrap();
+            assert_eq!(report.source, Source::Bundled);
+            assert_eq!(channel.sequence, bundled().unwrap().sequence);
+            assert!(report.notice.is_none() && report.key_id.is_none());
+            assert!(!saved_list(&paths).exists());
         }
     }
 }

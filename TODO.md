@@ -5,7 +5,7 @@
 - [ ] Servers is still an empty screen. Saved servers and Launch and join come in M6, after sign-in.
 - [ ] Play installs and verifies, then stops: launching needs Microsoft sign-in (M2). The account card on Play and the Account section in Settings are placeholders with disabled Sign in buttons.
 - [ ] The disclaimer lives in the sidebar footer. The About screen copy comes in M4.
-- [ ] The HUD jar (Fabric on the Esteban versions) and the hacks jar (Hacked only) come from `config/versions.json` (schema 2) compiled into the launcher, sha256 checked. M5 fetches it from the release channel and checks its signature. The v1.3.0 hacks hashes stay on the guard's list.
+- [ ] No signing key is in `config/keys.json` yet, so the launcher only uses its compiled-in `versions.json` and doesn't check for updates. Both start working once the public keys are added and a signed `versions.json` / `latest.json` is published.
 - [ ] "Upload to my Minecraft account" on the Skins screen is disabled until Microsoft sign-in (M2).
 - [ ] A Java picked in Settings is checked to be Java, but not yet against the major version each Minecraft version needs. A wrong one fails at launch with Java's own error.
 - [ ] Launching needs Microsoft sign-in (M2). Until then only install, plan and mods work.
@@ -31,7 +31,8 @@
 - [ ] App icon: right now it is the full logo on a square canvas of its own background color. Decide on a square cut of the logo for small icon sizes.
 - [x] BTC and XMR addresses and the Discord invite are in `config/donate.json`.
 - [ ] USDC address and its network. Until then About shows "Address not set yet" for USDC.
-- [ ] Signing keys for `versions.json` and the updater, kept offline (M5, M7).
+- [ ] Run `esteban-sign keygen` for the channel and the updater key (commands in `docs/update-channel.md`), keep the secret keys offline, and hand over the two public key lines for `config/keys.json`.
+- [ ] Decide where launcher downloads live before the first public release (separate download repo). `latest.json` is read from the launcher repo's releases until then.
 
 ## Later
 

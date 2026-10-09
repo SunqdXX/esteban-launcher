@@ -12,6 +12,7 @@ bytes.workspace = true
 directories.workspace = true
 futures.workspace = true
 hex.workspace = true
+minisign-verify.workspace = true
 png.workspace = true
 reqwest.workspace = true
 serde.workspace = true
@@ -28,6 +29,7 @@ zip.workspace = true
 junction.workspace = true
 
 [dev-dependencies]
+minisign.workspace = true
 tempfile.workspace = true
 wiremock.workspace = true
 

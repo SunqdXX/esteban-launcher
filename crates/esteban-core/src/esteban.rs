@@ -10,15 +10,15 @@ pub enum ArtifactKind {
     Hud,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Artifact {
     pub kind: ArtifactKind,
-    pub game_version: &'static str,
-    pub filename: &'static str,
-    pub url: &'static str,
-    pub sha256: &'static str,
+    pub game_version: String,
+    pub filename: String,
+    pub url: String,
+    pub sha256: String,
     pub size: u64,
-    version: &'static str,
+    version: String,
 }
 
 impl Artifact {
@@ -36,11 +36,11 @@ impl Artifact {
         }
     }
 
-    pub fn version(&self) -> &'static str {
-        self.version
+    pub fn version(&self) -> &str {
+        &self.version
     }
 
-    fn of(build: &'static Build, jar: &'static ChannelJar) -> Option<Self> {
+    fn of(build: &Build, jar: &ChannelJar) -> Option<Self> {
         let kind = match jar.id.as_str() {
             HACKS_MOD_ID => ArtifactKind::Hacks,
             HUD_MOD_ID => ArtifactKind::Hud,
@@ -48,18 +48,19 @@ impl Artifact {
         };
         Some(Self {
             kind,
-            game_version: &build.mc,
-            filename: &jar.file,
-            url: &jar.url,
-            sha256: &jar.sha256,
+            game_version: build.mc.clone(),
+            filename: jar.file.clone(),
+            url: jar.url.clone(),
+            sha256: jar.sha256.clone(),
             size: jar.size,
-            version: &jar.version,
+            version: jar.version.clone(),
         })
     }
 }
 
 fn find(kind: ArtifactKind, game_version: &str, hacked: bool) -> Option<Artifact> {
-    let build = channel::bundled()?.build(game_version, Loader::Fabric, hacked)?;
+    let channel = channel::current()?;
+    let build = channel.build(game_version, Loader::Fabric, hacked)?;
     build
         .jars
         .iter()
@@ -76,14 +77,15 @@ pub fn hud_for(game_version: &str) -> Option<Artifact> {
 }
 
 pub fn by_filename(filename: &str) -> Option<Artifact> {
-    channel::bundled()?
+    let channel = channel::current()?;
+    channel
         .jars()
         .filter(|(_, jar)| jar.file == filename)
         .find_map(|(build, jar)| Artifact::of(build, jar))
 }
 
 pub fn is_known_hacks_jar(sha256: &str) -> bool {
-    channel::bundled().is_some_and(|c| c.is_known_hacks_jar(sha256))
+    channel::known_hacks_jar(sha256)
 }
 
 #[cfg(test)]
@@ -97,20 +99,20 @@ mod tests {
             let hud = hud_for(v).unwrap();
             assert_eq!(hacks.filename, format!("esteban-1.4.0+{v}.jar"));
             assert_eq!(hud.filename, format!("esteban-hud-1.4.0+{v}.jar"));
-            assert!(hacks.url.ends_with(hacks.filename) && hud.url.ends_with(hud.filename));
+            assert!(hacks.url.ends_with(&hacks.filename) && hud.url.ends_with(&hud.filename));
             assert_eq!(hacks.sha256.len(), 64);
             assert_eq!(hud.sha256.len(), 64);
             assert_eq!(hacks.version(), "1.4.0");
             assert_eq!(hud.version(), "1.4.0");
-            assert_eq!(by_filename(hud.filename), Some(hud));
+            assert_eq!(by_filename(&hud.filename), Some(hud.clone()));
         }
     }
 
     #[test]
     fn only_hacks_jars_count_as_hacks_and_old_ones_still_do() {
         for v in ["1.21.4", "26.3"] {
-            assert!(is_known_hacks_jar(hacks_for(v).unwrap().sha256));
-            assert!(!is_known_hacks_jar(hud_for(v).unwrap().sha256));
+            assert!(is_known_hacks_jar(&hacks_for(v).unwrap().sha256));
+            assert!(!is_known_hacks_jar(&hud_for(v).unwrap().sha256));
         }
         assert!(is_known_hacks_jar(
             "12f31834ec685ab6008650c2666a109f595eaddef83ae79837639bc44bb9139d"
