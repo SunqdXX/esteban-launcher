@@ -1,4 +1,5 @@
 pub mod account;
+pub mod channel;
 pub mod download;
 pub mod error;
 pub mod esteban;
