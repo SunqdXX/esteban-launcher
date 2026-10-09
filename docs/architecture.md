@@ -58,6 +58,16 @@ Every skipped mod gets one plain sentence, printed during install and stored in 
 
 Jars the launcher did not put in `mods/` are left alone and listed as "added by you, not checked".
 
+## Forge
+
+Forge is offered from 1.6.1 to 1.20.1. A Forge instance gets Forge and nothing else from the launcher, plus whatever jars you put in `mods/`.
+
+- The installer jar comes from Forge's maven and is checked against the `.sha512` published next to it. The launcher reads it, it never runs Forge's installer UI.
+- **New format** (1.12.2, and 1.13 up): every library has a sha1 in the installer. Forge's setup tools (mappings, splitting and patching the game jar) run with the instance's own Java, and every file they produce that the installer lists a hash for (`<KEY>_SHA`) is checked afterwards. On a reinstall where all of those still match, the tools don't run again. The mappings step downloads Mojang's mappings itself, from Mojang.
+- **Old format** (1.6.1 to 1.12.1): the Forge jar is taken out of the checked installer. Each library is checked against the sha1s Forge lists for it, or Mojang's hash when the vanilla version lists the same file, or the `.sha1` published next to the file. A library with none of those is refused.
+- 1.5.2 Forge is left out: it only starts after the signature files are stripped out of Mojang's game jar, and the launcher doesn't modify Mojang's files.
+- The game jar is copied to `versions/<forge id>/<forge id>.jar`, the name Forge's own launch arguments expect.
+
 ## Pack folders
 
 `esteban-cli packs link --from <game folder>` points an instance's `shaderpacks/`, `resourcepacks/` and `screenshots/` at the same folders in another game folder, for example `~/.minecraft` from Lunar or the vanilla launcher. Nothing is copied. It is a symlink on Linux and a directory junction on Windows, so it needs no admin rights.
@@ -82,10 +92,12 @@ Every file download carries a hash. The `Download` type has no way to leave it o
 | Asset index, asset objects | sha1 from the version JSON and the index |
 | Java runtime manifest and files | sha1 from Mojang's runtime index and manifest |
 | Fabric libraries | sha512, sha256 or sha1 from the Fabric profile. Where it gives none (`fabric-loader`, and `intermediary` for 1.21.4), the Maven `.sha256` file next to the jar |
+| Forge installer | the `.sha512` (or `.sha256`, `.sha1`) next to it on Forge's maven |
+| Forge libraries and setup outputs | sha1 from the installer. Old installers: Forge's listed sha1s, Mojang's hash, or the `.sha1` next to the file (see [Forge](#forge)) |
 | Modrinth mods | sha512 from the Modrinth version |
 | Hacks jar | sha256 pinned in the launcher (signed `versions.json` from M5) |
 
-Not hash-checked, because no source publishes a hash for them: Mojang's version manifest and runtime index, Fabric Meta answers, Modrinth API answers. They are fetched over HTTPS from the [allowed hosts](network.md) only. The Fabric `.sha256` files come from the same host as the jar, so they catch corruption but not a compromised Maven.
+Not hash-checked, because no source publishes a hash for them: Mojang's version manifest and runtime index, Fabric Meta answers, Modrinth API answers, Forge's version list and recommended builds. They are fetched over HTTPS from the [allowed hosts](network.md) only. The Fabric `.sha256` files come from the same host as the jar, so they catch corruption but not a compromised Maven.
 
 Files already on disk are re-hashed on every install and launch, and a mismatch is fetched again.
 

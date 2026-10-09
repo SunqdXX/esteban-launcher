@@ -13,6 +13,13 @@ Nothing below is bundled in our releases or this repo, except the fonts. Mods ar
 | FerriteCore | MIT |
 | ImmediatelyFast | LGPL-3.0-or-later |
 
+## Loaders
+
+| Loader | License | Notes |
+|---|---|---|
+| Fabric Loader | Apache-2.0 | |
+| Minecraft Forge | LGPL-2.1 | Downloaded from Forge's maven like every third-party launcher does. Forge is supported by people visiting [minecraftforge.net](https://minecraftforge.net/). |
+
 ## Not in the defaults
 
 **Entity Culling** is licensed under the tr7zw Protective License, which says:

@@ -18,6 +18,7 @@ pub struct VersionJson {
     pub asset_index: AssetIndexRef,
     pub assets: String,
     pub downloads: VersionDownloads,
+    #[serde(default)]
     pub java_version: JavaVersion,
     pub libraries: Vec<Library>,
     #[serde(default)]
@@ -90,6 +91,15 @@ pub struct JavaVersion {
     pub major_version: u32,
 }
 
+impl Default for JavaVersion {
+    fn default() -> Self {
+        Self {
+            component: "jre-legacy".into(),
+            major_version: 8,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Library {
     pub name: String,
@@ -143,4 +153,22 @@ pub struct LogFile {
     pub sha1: String,
     pub size: u64,
     pub url: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_version_without_java_info_gets_java_8_like_mojangs_launcher() {
+        let v: VersionJson = serde_json::from_str(
+            r#"{"id":"1.6.4","type":"release","mainClass":"net.minecraft.client.main.Main",
+                "minecraftArguments":"--username ${auth_player_name}","assets":"legacy",
+                "assetIndex":{"id":"legacy","sha1":"aa","size":1,"totalSize":1,"url":"https://launchermeta.mojang.com/x.json"},
+                "downloads":{"client":{"sha1":"bb","size":1,"url":"https://launcher.mojang.com/c.jar"}},"libraries":[]}"#,
+        )
+        .unwrap();
+        assert_eq!(v.java_version.component, "jre-legacy");
+        assert_eq!(v.java_version.major_version, 8);
+    }
 }

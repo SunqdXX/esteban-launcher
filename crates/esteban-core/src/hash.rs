@@ -10,6 +10,7 @@ pub enum Hash {
     Sha1(String),
     Sha256(String),
     Sha512(String),
+    Sha1Any(Vec<String>),
 }
 
 impl Hash {
@@ -25,9 +26,13 @@ impl Hash {
         Self::Sha512(hex.to_ascii_lowercase())
     }
 
+    pub fn sha1_any(hexes: &[String]) -> Self {
+        Self::Sha1Any(hexes.iter().map(|h| h.to_ascii_lowercase()).collect())
+    }
+
     pub fn algorithm(&self) -> &'static str {
         match self {
-            Self::Sha1(_) => "sha1",
+            Self::Sha1(_) | Self::Sha1Any(_) => "sha1",
             Self::Sha256(_) => "sha256",
             Self::Sha512(_) => "sha512",
         }
@@ -36,12 +41,20 @@ impl Hash {
     pub fn expected(&self) -> &str {
         match self {
             Self::Sha1(h) | Self::Sha256(h) | Self::Sha512(h) => h,
+            Self::Sha1Any(list) => list.first().map_or("", String::as_str),
+        }
+    }
+
+    fn accepts(&self, actual: &str) -> bool {
+        match self {
+            Self::Sha1Any(list) => list.iter().any(|h| h == actual),
+            _ => actual == self.expected(),
         }
     }
 
     pub fn digest(&self, data: &[u8]) -> String {
         match self {
-            Self::Sha1(_) => hex::encode(sha1::Sha1::digest(data)),
+            Self::Sha1(_) | Self::Sha1Any(_) => hex::encode(sha1::Sha1::digest(data)),
             Self::Sha256(_) => hex::encode(sha2::Sha256::digest(data)),
             Self::Sha512(_) => hex::encode(sha2::Sha512::digest(data)),
         }
@@ -49,7 +62,7 @@ impl Hash {
 
     pub fn verify(&self, data: &[u8], what: &str) -> Result<()> {
         let actual = self.digest(data);
-        if actual == self.expected() {
+        if self.accepts(&actual) {
             Ok(())
         } else {
             Err(Error::HashMismatch {
@@ -63,7 +76,7 @@ impl Hash {
 
     pub async fn file_matches(&self, path: &Path) -> Result<bool> {
         match tokio::fs::read(path).await {
-            Ok(data) => Ok(self.digest(&data) == self.expected()),
+            Ok(data) => Ok(self.accepts(&self.digest(&data))),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(e) => Err(e).at(path),
         }
@@ -106,6 +119,18 @@ mod tests {
             good.verify(b"ab", "x"),
             Err(Error::HashMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn any_of_several_sha1s_is_accepted_and_nothing_else() {
+        let any = Hash::sha1_any(&[
+            "0000000000000000000000000000000000000000".into(),
+            "A9993E364706816ABA3E25717850C26C9CD0D89D".into(),
+        ]);
+        assert!(any.verify(b"abc", "x").is_ok());
+        assert!(any.verify(b"abd", "x").is_err());
+        assert!(Hash::sha1_any(&[]).verify(b"abc", "x").is_err());
+        assert_eq!(any.algorithm(), "sha1");
     }
 
     #[tokio::test]

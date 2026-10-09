@@ -48,6 +48,8 @@ pub enum Error {
     #[error("{0}")]
     Fabric(String),
     #[error("{0}")]
+    Forge(String),
+    #[error("{0}")]
     Guard(String),
     #[error("{0}")]
     Launch(String),

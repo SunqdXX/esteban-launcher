@@ -604,6 +604,7 @@ async fn launch(net: &Net, paths: &Paths, args: LaunchArgs, dry_run: bool) -> Re
     } else {
         args.smoke_marker.clone()
     };
+    let marker_count = markers.len();
     let smoke = args.smoke_test.map(|seconds| Smoke {
         markers,
         timeout: Duration::from_secs(seconds),
@@ -612,7 +613,11 @@ async fn launch(net: &Net, paths: &Paths, args: LaunchArgs, dry_run: bool) -> Re
     eprintln!("starting the game");
     let outcome = launch::run(&plan, |line| println!("{line}"), smoke).await?;
 
-    if let Some(smoke) = &outcome.smoke {
+    let reached = outcome
+        .smoke
+        .as_ref()
+        .is_some_and(|smoke| smoke.markers_seen.len() == marker_count);
+    if let Some(smoke) = outcome.smoke.as_ref().filter(|_| reached) {
         eprintln!(
             "smoke test: reached the main menu with {} mods loaded",
             smoke.loaded_mods.len()
@@ -629,6 +634,10 @@ async fn launch(net: &Net, paths: &Paths, args: LaunchArgs, dry_run: bool) -> Re
         if let Some(report) = &crash.report {
             eprintln!("  full report: {}", report.display());
         }
+        return Err(Failure::GameCrashed);
+    }
+    if outcome.smoke.is_some() && !reached {
+        eprintln!("smoke test: the game stopped before the main menu");
         return Err(Failure::GameCrashed);
     }
     Ok(())

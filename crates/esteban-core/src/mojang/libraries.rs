@@ -136,9 +136,14 @@ pub fn library_key(name: &str) -> Result<String> {
 
 pub fn maven_path(name: &str) -> Result<String> {
     let c = parse_coordinate(name)?;
+    let extension = name
+        .split_once('@')
+        .map(|(_, ext)| ext)
+        .filter(|ext| !ext.is_empty() && ext.chars().all(|ch| ch.is_ascii_alphanumeric()))
+        .unwrap_or("jar");
     let file = match c.classifier {
-        Some(classifier) => format!("{}-{}-{classifier}.jar", c.artifact, c.version),
-        None => format!("{}-{}.jar", c.artifact, c.version),
+        Some(classifier) => format!("{}-{}-{classifier}.{extension}", c.artifact, c.version),
+        None => format!("{}-{}.{extension}", c.artifact, c.version),
     };
     Ok(format!(
         "{}/{}/{}/{file}",
@@ -174,6 +179,14 @@ mod tests {
             "org.lwjgl:lwjgl:natives-linux"
         );
         assert!(maven_path("broken").is_err());
+        assert_eq!(
+            maven_path("de.oceanlabs.mcp:mcp_config:1.20.1-20230612.114412@zip").unwrap(),
+            "de/oceanlabs/mcp/mcp_config/1.20.1-20230612.114412/mcp_config-1.20.1-20230612.114412.zip"
+        );
+        assert_eq!(
+            maven_path("net.minecraft:client:1.20.1-20230612.114412:mappings@txt").unwrap(),
+            "net/minecraft/client/1.20.1-20230612.114412/client-1.20.1-20230612.114412-mappings.txt"
+        );
     }
 
     fn lib(json: &str) -> Library {

@@ -8,6 +8,7 @@ use crate::download::{self, Download, Stats};
 use crate::error::IoContext;
 use crate::esteban;
 use crate::fabric;
+use crate::forge;
 use crate::hash::Hash;
 use crate::instance::{Instance, InstanceFile, Jar};
 use crate::java::{self, JavaRuntime};
@@ -130,7 +131,18 @@ pub async fn install(
         }
     }
 
+    let (java, java_stats) = java::ensure(
+        net,
+        paths,
+        &platform,
+        &version.java_version.component,
+        progress,
+    )
+    .await?;
+    stats.add(java_stats);
+
     let mut file = instance.read_file().await?;
+    let mut game_jar = client_jar.clone();
     let loader = match instance.loader {
         Loader::Vanilla => LaunchProfile::vanilla(&version),
         Loader::Fabric => {
@@ -144,9 +156,20 @@ pub async fn install(
             fabric::launch_profile(profile, &loader_version, resolved)
         }
         Loader::Forge => {
-            return Err(Error::Unsupported(
-                "Forge instances can't be installed by this build yet.".into(),
-            ));
+            let setup = forge::Setup {
+                net,
+                paths,
+                instance,
+                platform: &platform,
+                manifest: &manifest,
+                vanilla: &version,
+                client_jar: &client_jar,
+                java: &java,
+                progress,
+            };
+            let prepared = forge::prepare(&setup, &file, options.update).await?;
+            game_jar = prepared.client_jar;
+            prepared.profile
         }
     };
 
@@ -158,11 +181,17 @@ pub async fn install(
         .filter(|l| !loader_keys.contains(l.key.as_str()))
         .collect();
     let all_libraries = loader.libraries.iter().chain(&vanilla_libraries);
+    let loader_downloads: &[_] = if instance.loader == Loader::Forge {
+        &[]
+    } else {
+        &loader.libraries
+    };
     stats.add(
         download::ensure_all(
             net,
-            all_libraries
-                .clone()
+            loader_downloads
+                .iter()
+                .chain(&vanilla_libraries)
                 .map(|l| l.download.clone())
                 .chain(vanilla.natives.iter().map(|n| n.download.clone()))
                 .collect(),
@@ -173,21 +202,11 @@ pub async fn install(
         .await?,
     );
     let mut classpath: Vec<PathBuf> = all_libraries.map(|l| l.path.clone()).collect();
-    classpath.push(client_jar);
+    classpath.push(game_jar);
 
     let (asset_stats, game_assets) =
         assets::ensure(net, paths, &version.asset_index, &instance.dir, progress).await?;
     stats.add(asset_stats);
-
-    let (java, java_stats) = java::ensure(
-        net,
-        paths,
-        &platform,
-        &version.java_version.component,
-        progress,
-    )
-    .await?;
-    stats.add(java_stats);
 
     if vanilla.natives.is_empty() {
         fsx::create_dir(&instance.natives_dir()).await?;

@@ -16,7 +16,7 @@ pub const FORGE_PROMOS: &str =
 pub const FORGE_METADATA: &str =
     "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml";
 pub const FABRIC_FIRST: &str = "1.14";
-pub const FORGE_FIRST: &str = "1.5.2";
+pub const FORGE_FIRST: &str = "1.6.1";
 pub const FORGE_LAST: &str = "1.20.1";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -387,7 +387,7 @@ mod tests {
 
     const IDS: &[&str] = &[
         "26.3", "26w14a", "1.21.4", "1.20.2", "1.20.1", "1.14", "1.12.2", "1.12.1", "1.7.10",
-        "1.5.2", "1.5.1", "1.0",
+        "1.6.1", "1.5.2", "1.0",
     ];
 
     #[test]
@@ -406,8 +406,8 @@ mod tests {
             "1.14-28.0.0",
             "1.12.2-14.23.5.2859",
             "1.7.10-10.13.4.1614-1.7.10",
+            "1.6.1-8.9.0.775",
             "1.5.2-7.8.1.738",
-            "1.5.1-7.7.2.682",
         ]
         .iter()
         .map(|v| (*v).to_string())
@@ -441,10 +441,10 @@ mod tests {
             Some("Forge has no build for 1.12.1.")
         );
         assert!(get("1.7.10").forge.available);
-        assert!(get("1.5.2").forge.available);
+        assert!(get("1.6.1").forge.available);
         assert_eq!(
-            get("1.5.1").forge.reason.as_deref(),
-            Some("Forge starts at 1.5.2.")
+            get("1.5.2").forge.reason.as_deref(),
+            Some("Forge starts at 1.6.1.")
         );
         assert!(!get("1.0").forge.available && !get("1.0").fabric.available);
         assert!(get("1.0").offer(Loader::Vanilla).available);

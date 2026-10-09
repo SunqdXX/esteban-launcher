@@ -5,6 +5,7 @@ pub mod download;
 pub mod error;
 pub mod esteban;
 pub mod fabric;
+pub mod forge;
 pub mod fsx;
 pub mod hash;
 pub mod install;
