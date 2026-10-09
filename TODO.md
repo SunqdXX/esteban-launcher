@@ -26,7 +26,7 @@
 ## Needs the owner
 
 - [ ] Mojang approval of the registered client ID. Blocks M2.
-- [ ] App icon: right now it is the full logo on a square canvas of its own background color. Decide on a square cut of the logo for small icon sizes.
+- [x] App icon: the owner's cropped cube mark, padded to a square in its own background color.
 - [x] BTC and XMR addresses and the Discord invite are in `config/donate.json`.
 - [x] USDC address (Solana) is in `config/donate.json`.
 - [x] Channel and updater keys made by the owner, public keys in `config/keys.json` (channel F06D6DD40133B8FC, updater 1B5726E0D3D4ECBE).
