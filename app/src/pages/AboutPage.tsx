@@ -17,45 +17,38 @@ function Qr({ rows }: { rows: string[] }) {
 
 function CoinCard({ coin }: { coin: Coin }) {
   const [copied, setCopied] = useState<string | null>(null);
-  const empty = coin.address.length === 0;
   return (
     <div className={styles.coin}>
       <div className={styles.coinHead}>
         <span className={styles.coinName}>{coin.name}</span>
         {coin.note && <span className={styles.coinNote}>{coin.note}</span>}
       </div>
-      {empty ? (
-        <p className={styles.empty}>Address not set yet</p>
-      ) : (
-        <>
-          <Qr rows={coin.qr} />
-          <input
-            className={styles.address}
-            readOnly
-            value={coin.address}
-            aria-label={`${coin.name} address`}
-            onFocus={(e) => {
-              e.target.select();
-            }}
-          />
-          <button
-            type="button"
-            className={styles.copy}
-            onClick={() => {
-              navigator.clipboard
-                .writeText(coin.address)
-                .then(() => {
-                  setCopied("Copied");
-                })
-                .catch(() => {
-                  setCopied("Select the address and copy it by hand");
-                });
-            }}
-          >
-            {copied ?? "Copy address"}
-          </button>
-        </>
-      )}
+      <Qr rows={coin.qr} />
+      <input
+        className={styles.address}
+        readOnly
+        value={coin.address}
+        aria-label={`${coin.name} address`}
+        onFocus={(e) => {
+          e.target.select();
+        }}
+      />
+      <button
+        type="button"
+        className={styles.copy}
+        onClick={() => {
+          navigator.clipboard
+            .writeText(coin.address)
+            .then(() => {
+              setCopied("Copied");
+            })
+            .catch(() => {
+              setCopied("Select the address and copy it by hand");
+            });
+        }}
+      >
+        {copied ?? "Copy address"}
+      </button>
     </div>
   );
 }
@@ -315,15 +308,17 @@ export default function AboutPage() {
 
       <Updates />
 
-      <section className={styles.section}>
-        <h2 className={styles.h2}>Support</h2>
-        <p className={styles.text}>Crypto only, and never needed for anything. Everything in the launcher stays free.</p>
-        <div className={styles.coins}>
-          {about.coins.map((coin) => (
-            <CoinCard key={coin.name} coin={coin} />
-          ))}
-        </div>
-      </section>
+      {about.coins.length > 0 && (
+        <section className={styles.section}>
+          <h2 className={styles.h2}>Support</h2>
+          <p className={styles.text}>Crypto only, and never needed for anything. Everything in the launcher stays free.</p>
+          <div className={styles.coins}>
+            {about.coins.map((coin) => (
+              <CoinCard key={coin.name} coin={coin} />
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className={styles.section}>
         <h2 className={styles.h2}>Licenses</h2>

@@ -172,15 +172,6 @@
   color: var(--venom);
 }
 
-.empty {
-  margin: 0;
-  padding: var(--space-5) 0;
-  text-align: center;
-  font-size: var(--text-sm);
-  color: var(--muted);
-  border: var(--line) dashed var(--border);
-}
-
 .bad {
   color: var(--red);
 }

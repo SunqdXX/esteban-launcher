@@ -793,23 +793,30 @@ fn coin(name: &'static str, note: String, address: &str) -> Coin {
     }
 }
 
-#[tauri::command]
-pub fn about() -> About {
-    let config = donate();
+fn coins(config: &Donate) -> Vec<Coin> {
     let usdc_note = if config.usdc_network.trim().is_empty() {
         String::new()
     } else {
         format!("on {}", config.usdc_network.trim())
     };
+    [
+        coin("Bitcoin", String::new(), &config.btc),
+        coin("Monero", String::new(), &config.xmr),
+        coin("USDC", usdc_note, &config.usdc),
+    ]
+    .into_iter()
+    .filter(|coin| !coin.address.is_empty())
+    .collect()
+}
+
+#[tauri::command]
+pub fn about() -> About {
+    let config = donate();
     About {
         version: esteban_core::VERSION,
         disclaimer: esteban_core::DISCLAIMER,
         discord: !config.discord.trim().is_empty(),
-        coins: vec![
-            coin("Bitcoin", String::new(), &config.btc),
-            coin("Monero", String::new(), &config.xmr),
-            coin("USDC", usdc_note, &config.usdc),
-        ],
+        coins: coins(&config),
     }
 }
 
@@ -847,11 +854,23 @@ mod tests {
     }
 
     #[test]
-    fn empty_addresses_have_no_qr_and_the_shipped_config_parses() {
+    fn coins_without_an_address_are_left_out_and_the_shipped_config_parses() {
         let empty = coin("Bitcoin", String::new(), "   ");
         assert!(empty.address.is_empty() && empty.qr.is_empty());
         let parsed: Donate = serde_json::from_str(DONATE).unwrap();
         assert!(parsed.discord.is_empty() || parsed.discord.starts_with("https://"));
+        let mut config = Donate {
+            btc: "bc1qexampleexampleexampleexample".into(),
+            xmr: "  ".into(),
+            ..Donate::default()
+        };
+        let names = |config: &Donate| coins(config).iter().map(|c| c.name).collect::<Vec<_>>();
+        assert_eq!(names(&config), ["Bitcoin"]);
+        config.usdc = "0xexample".into();
+        config.usdc_network = "Ethereum".into();
+        assert_eq!(names(&config), ["Bitcoin", "USDC"]);
+        assert_eq!(coins(&config)[1].note, "on Ethereum");
+        assert!(names(&Donate::default()).is_empty());
     }
 
     #[test]
