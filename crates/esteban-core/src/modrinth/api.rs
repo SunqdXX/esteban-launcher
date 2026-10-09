@@ -86,6 +86,28 @@ fn json_list(items: &[String]) -> Result<String> {
     })
 }
 
+impl Modrinth<'_> {
+    pub async fn versions_for_loader(
+        &self,
+        project: &str,
+        loader: &str,
+        game: &str,
+    ) -> Result<Vec<Version>> {
+        let base = format!("{API}/project/{}/version", token(project)?);
+        let url = Url::parse_with_params(
+            &base,
+            &[
+                ("loaders", json_list(&[token(loader)?.to_string()])?),
+                ("game_versions", json_list(&[game.to_string()])?),
+            ],
+        )
+        .map_err(|_| Error::BadUrl(base.clone()))?;
+        self.net
+            .json(url.as_str(), &format!("Modrinth versions of {project}"))
+            .await
+    }
+}
+
 impl Source for Modrinth<'_> {
     async fn versions(&self, project: &str, game: &str) -> Result<Vec<Version>> {
         let base = format!("{API}/project/{}/version", token(project)?);

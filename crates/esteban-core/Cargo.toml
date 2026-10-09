@@ -12,6 +12,7 @@ bytes.workspace = true
 directories.workspace = true
 futures.workspace = true
 hex.workspace = true
+png.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

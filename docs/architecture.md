@@ -68,6 +68,16 @@ Forge is offered from 1.6.1 to 1.20.1. A Forge instance gets Forge and nothing e
 - 1.5.2 Forge is left out: it only starts after the signature files are stripped out of Mojang's game jar, and the launcher doesn't modify Mojang's files.
 - The game jar is copied to `versions/<forge id>/<forge id>.jar`, the name Forge's own launch arguments expect.
 
+## Skins
+
+A skin library lives in the settings folder (`skins/<id>.png` plus `skins.json`), so it stays put when the game folder moves. It works offline and needs no account.
+
+- Import checks the file is a real PNG, 64x64 (or the old 64x32), under 1 MB. Classic or slim arms are guessed from the arm pixels and can be changed.
+- Each instance picks one skin, or "account skin" for none.
+- At launch, Fabric and Forge instances get the pick through [CustomSkinLoader](https://modrinth.com/mod/customskinloader), downloaded from Modrinth like every other mod. The launcher writes its source list to only two entries, your local file first and then Mojang, so none of its other skin sites are ever asked. The skin is copied to `CustomSkinLoader/LocalSkin/skins/<account name>.png`. Only you see it; other players see your Mojang skin.
+- Vanilla has no mod to show a local skin, and versions without a CustomSkinLoader build (1.7.10 and older, 26.3 for now) say so instead.
+- Uploading a skin to your Mojang account comes with Microsoft sign-in (M2).
+
 ## Pack folders
 
 `esteban-cli packs link --from <game folder>` points an instance's `shaderpacks/`, `resourcepacks/` and `screenshots/` at the same folders in another game folder, for example `~/.minecraft` from Lunar or the vanilla launcher. Nothing is copied. It is a symlink on Linux and a directory junction on Windows, so it needs no admin rights.

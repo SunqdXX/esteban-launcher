@@ -217,6 +217,13 @@ impl Instance {
         Ok(known.title)
     }
 
+    pub async fn set_skin(&self, skin: Option<String>) -> Result<InstanceFile> {
+        let mut file = self.read_file().await?;
+        file.skin = skin;
+        self.write_file(&file).await?;
+        Ok(file)
+    }
+
     pub async fn set_loader_version(&self, version: Option<String>) -> Result<InstanceFile> {
         if self.loader == Loader::Vanilla && version.is_some() {
             return Err(Error::Unsupported(

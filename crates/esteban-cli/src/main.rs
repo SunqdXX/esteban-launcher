@@ -16,6 +16,7 @@ use esteban_core::net::Net;
 use esteban_core::packs::{self, Imported, Linked};
 use esteban_core::paths::Paths;
 use esteban_core::profile::{HACKS_WARNING, Settings};
+use esteban_core::skins::{self, Applied, Model};
 use esteban_core::{DISCLAIMER, Error};
 
 use crate::progress::CliProgress;
@@ -59,6 +60,56 @@ enum Command {
     Loaders(Selector),
     #[command(about = "Pin a loader build for an instance, or go back to the latest stable one")]
     LoaderVersion(LoaderPick),
+    #[command(
+        subcommand,
+        about = "Your skin library and the skin each instance shows"
+    )]
+    Skin(SkinCommand),
+}
+
+#[derive(Subcommand)]
+enum SkinCommand {
+    #[command(about = "Add a skin PNG (64x64 or 64x32) to the library")]
+    Add {
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+    },
+    #[command(about = "List the skins in the library")]
+    List,
+    #[command(about = "Pick the skin an instance shows, or account for your own")]
+    Use {
+        #[command(flatten)]
+        selector: Selector,
+        #[arg(value_name = "SKIN", help = "A skin id from skin list, or account")]
+        skin: String,
+    },
+    #[command(about = "Rename a skin")]
+    Rename {
+        #[arg(value_name = "SKIN")]
+        id: String,
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+    #[command(about = "Set a skin's arms to classic or slim")]
+    Model {
+        #[arg(value_name = "SKIN")]
+        id: String,
+        #[arg(value_name = "MODEL", value_parser = parse_model)]
+        model: Model,
+    },
+    #[command(about = "Remove a skin from the library")]
+    Remove {
+        #[arg(value_name = "SKIN")]
+        id: String,
+    },
+}
+
+fn parse_model(value: &str) -> Result<Model, String> {
+    match value {
+        "classic" => Ok(Model::Classic),
+        "slim" => Ok(Model::Slim),
+        other => Err(format!("{other} isn't classic or slim")),
+    }
 }
 
 #[derive(Args, Clone)]
@@ -248,6 +299,7 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         }
         Command::Packs(PacksCommand::Link(source)) => link_packs(&paths, &source).await,
         Command::Packs(PacksCommand::Import(source)) => import_packs(&paths, &source).await,
+        Command::Skin(command) => skin_command(&paths, command).await,
         Command::Versions => list_versions(&net, &paths).await,
         Command::Loaders(selector) => list_loaders(&net, &paths, &selector).await,
         Command::LoaderVersion(pick) => pick_loader(&net, &paths, &pick).await,
@@ -260,6 +312,68 @@ async fn run(cli: Cli) -> Result<(), Failure> {
             Ok(())
         }
     }
+}
+
+fn model_name(model: Model) -> &'static str {
+    match model {
+        Model::Classic => "classic",
+        Model::Slim => "slim",
+    }
+}
+
+async fn skin_command(paths: &Paths, command: SkinCommand) -> Result<(), Failure> {
+    match command {
+        SkinCommand::Add { file } => {
+            let skin = skins::import(paths, &file).await?;
+            println!("{}  {}  {}", skin.id, skin.name, model_name(skin.model));
+        }
+        SkinCommand::List => {
+            let all = skins::list(paths).await?;
+            if all.is_empty() {
+                eprintln!("No skins yet. Add one with: skin add <file.png>");
+            }
+            for skin in all {
+                println!("{}  {}  {}", skin.id, skin.name, model_name(skin.model));
+            }
+        }
+        SkinCommand::Use { selector, skin } => {
+            let instance = selector.instance(paths)?;
+            let chosen = if skin == "account" {
+                None
+            } else {
+                let Some(found) = skins::find(paths, &skin).await? else {
+                    return Err(Failure::Error(Error::Unsupported(format!(
+                        "{skin} isn't in the skin list. Run skin list to see the ids."
+                    ))));
+                };
+                Some(found)
+            };
+            instance
+                .set_skin(chosen.as_ref().map(|s| s.id.clone()))
+                .await?;
+            match chosen {
+                Some(s) => eprintln!(
+                    "{} will show {} on its next launch.",
+                    instance.label(),
+                    s.name
+                ),
+                None => eprintln!("{} will show your account skin.", instance.label()),
+            }
+        }
+        SkinCommand::Rename { id, name } => {
+            let skin = skins::update(paths, &id, Some(&name), None).await?;
+            eprintln!("Renamed to {}.", skin.name);
+        }
+        SkinCommand::Model { id, model } => {
+            let skin = skins::update(paths, &id, None, Some(model)).await?;
+            eprintln!("{} now has {} arms.", skin.name, model_name(skin.model));
+        }
+        SkinCommand::Remove { id } => {
+            skins::remove(paths, &id).await?;
+            eprintln!("Removed.");
+        }
+    }
+    Ok(())
 }
 
 async fn list_versions(net: &Net, paths: &Paths) -> Result<(), Failure> {
@@ -599,6 +713,15 @@ async fn launch(net: &Net, paths: &Paths, args: LaunchArgs, dry_run: bool) -> Re
         return Ok(());
     }
 
+    match skins::apply(paths, &installed.instance, &session.username).await? {
+        Applied::Skin { name } => eprintln!("skin: {name}"),
+        Applied::AccountSkin => {}
+        Applied::Unavailable { reason } => {
+            if installed.instance.read_file().await?.skin.is_some() {
+                eprintln!("skin: {reason}");
+            }
+        }
+    }
     let markers = if args.smoke_marker.is_empty() {
         vec!["Sound engine started".to_string()]
     } else {

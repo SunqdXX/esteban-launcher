@@ -25,3 +25,5 @@ All requests are HTTPS, have timeouts, and send a fixed `User-Agent` that names 
 | `objects.githubusercontent.com`, `release-assets.githubusercontent.com` | GitHub release asset downloads (redirect targets of `github.com`) |
 
 No telemetry, no analytics, no other hosts.
+
+The game itself talks to Mojang, and so does the skin mod (CustomSkinLoader) inside it, to fetch skins and capes. The launcher sets the skin mod's source list to the local file and Mojang only.

@@ -1169,6 +1169,7 @@ dependencies = [
  "futures",
  "hex",
  "junction",
+ "png 0.18.1",
  "reqwest",
  "serde",
  "serde_json",

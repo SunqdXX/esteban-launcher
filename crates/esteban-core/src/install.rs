@@ -25,6 +25,7 @@ use crate::net::Net;
 use crate::paths::Paths;
 use crate::profile::{HACKS_WARNING, NEW_INSTANCE_OPTIONS, Settings};
 use crate::progress::Progress;
+use crate::skins;
 use crate::system::{self, Platform};
 use crate::{Error, Result, fsx};
 
@@ -214,7 +215,8 @@ pub async fn install(
         natives::extract(&vanilla.natives, &instance.natives_dir()).await?;
     }
 
-    let mods = if instance.loader == Loader::Fabric {
+    let previous = file.lock();
+    let mut mods = if instance.loader == Loader::Fabric {
         let env = Environment {
             game: game.clone(),
             java_major: java
@@ -231,6 +233,57 @@ pub async fn install(
     };
     if instance.loader.has_mods() {
         fsx::create_dir(&instance.mods_dir()).await?;
+        let last = previous
+            .as_ref()
+            .and_then(|l| l.mods.iter().find(|m| m.slug == skins::SKIN_MOD_SLUG));
+        let found = match skins::skin_mod(net, instance.loader, &game, last, options.update).await {
+            Ok(found) => found,
+            Err(e) if is_network(&e) => last.cloned(),
+            Err(e) => return Err(e),
+        };
+        match found {
+            Some(skin_mod) => {
+                download::ensure_all(
+                    net,
+                    vec![Download {
+                        url: skin_mod.url.clone(),
+                        dest: instance.mods_dir().join(jar_name(&skin_mod.filename)?),
+                        hash: Hash::sha512(&skin_mod.sha512),
+                        size: Some(skin_mod.size),
+                        executable: false,
+                    }],
+                    1,
+                    progress,
+                    "skin mod",
+                )
+                .await?;
+                mods.mods.push(skin_mod);
+            }
+            None => {
+                let skipped = skins::skin_mod_unavailable(&game);
+                progress.notice(&skipped.message);
+                mods.unavailable.push(Unavailable {
+                    title: skipped.title,
+                    message: skipped.message,
+                });
+            }
+        }
+    }
+    if let Some(previous) = &previous {
+        let keep: HashSet<&str> = mods
+            .mods
+            .iter()
+            .map(|m| m.filename.as_str())
+            .chain(mods.extras.iter().map(String::as_str))
+            .collect();
+        for old in previous.filenames().filter(|name| !keep.contains(name)) {
+            let path = instance.mods_dir().join(jar_name(old)?);
+            if let Err(e) = tokio::fs::remove_file(&path).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!(path = %path.display(), error = %e, "could not remove an outdated mod");
+            }
+        }
     }
 
     file.loader.version.clone_from(&loader.loader_version);
@@ -307,6 +360,10 @@ async fn fabric_mods(
         .collect();
     let off: Vec<&str> = disabled.iter().map(String::as_str).collect();
     let previous = file.lock();
+    let previous = previous.map(|mut lock| {
+        lock.mods.retain(|m| m.slug != skins::SKIN_MOD_SLUG);
+        lock
+    });
     let same_choice = |lock: &&ModLock| lock.game_version == game && lock.disabled == disabled;
     let reuse = previous
         .as_ref()
@@ -392,21 +449,6 @@ async fn fabric_mods(
         });
     }
 
-    if let Some(previous) = &previous {
-        let keep: HashSet<&str> = mods
-            .iter()
-            .map(|m| m.filename.as_str())
-            .chain(extra_names.iter().map(String::as_str))
-            .collect();
-        for old in previous.filenames().filter(|name| !keep.contains(name)) {
-            let path = mods_dir.join(jar_name(old)?);
-            if let Err(e) = tokio::fs::remove_file(&path).await
-                && e.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!(path = %path.display(), error = %e, "could not remove an outdated mod");
-            }
-        }
-    }
     Ok(ModsOutcome {
         mods,
         extras: extra_names,

@@ -20,6 +20,12 @@ Nothing below is bundled in our releases or this repo, except the fonts. Mods ar
 | Fabric Loader | Apache-2.0 | |
 | Minecraft Forge | LGPL-2.1 | Downloaded from Forge's maven like every third-party launcher does. Forge is supported by people visiting [minecraftforge.net](https://minecraftforge.net/). |
 
+## Skin mod
+
+| Mod | License | Notes |
+|---|---|---|
+| CustomSkinLoader | GPL-3.0-only | Added to Fabric and Forge instances to show a local skin. Its source list is set to your local file, then Mojang. |
+
 ## Not in the defaults
 
 **Entity Culling** is licensed under the tr7zw Protective License, which says:
