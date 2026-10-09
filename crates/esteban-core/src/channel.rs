@@ -603,6 +603,68 @@ mod tests {
         }
 
         #[tokio::test]
+        #[ignore = "needs a list signed with the owner's channel key in ESTEBAN_SIGNED_LIST"]
+        async fn a_list_signed_with_the_real_channel_key() {
+            let Some(folder) = std::env::var_os("ESTEBAN_SIGNED_LIST") else {
+                return;
+            };
+            let folder = PathBuf::from(folder);
+            let body = std::fs::read(folder.join("versions.json")).unwrap();
+            let signature = std::fs::read_to_string(folder.join("versions.json.minisig")).unwrap();
+            let keys = signing::built_in(Purpose::Channel);
+            assert!(!keys.is_empty(), "no channel key is built in");
+            let net = Net::new(Policy::local_test()).unwrap();
+            let now = utc_now();
+            let run = |body: Vec<u8>, signature: Option<String>| {
+                let net = net.clone();
+                let now = now.clone();
+                async move {
+                    let dir = tempfile::tempdir().unwrap();
+                    let paths = Paths::new(dir.path());
+                    let server = serve(Some(&body), signature.as_deref()).await;
+                    let url = format!("{}/versions.json", server.uri());
+                    refresh_with(&net, &paths, &url, keys, &now)
+                        .await
+                        .unwrap()
+                        .1
+                }
+            };
+
+            let real = run(body.clone(), Some(signature.clone())).await;
+            println!("REAL-KEY signed as published: {real:?}");
+            assert_eq!(real.source, Source::Github);
+            assert!(real.notice.is_none());
+            assert_eq!(real.key_id, signing::key_id(&keys[0]));
+
+            let mut tampered = body.clone();
+            let at = tampered
+                .windows(8)
+                .position(|w| w == b"\"sha256\"")
+                .unwrap()
+                + 12;
+            tampered[at] = if tampered[at] == b'0' { b'1' } else { b'0' };
+            let changed = run(tampered, Some(signature.clone())).await;
+            println!("REAL-KEY one hash character changed: {changed:?}");
+            assert_eq!(changed.source, Source::Bundled);
+            assert!(changed.notice.unwrap().contains("isn't signed by a key"));
+
+            let unsigned = run(body.clone(), None).await;
+            println!("REAL-KEY no signature file: {unsigned:?}");
+            assert_eq!(unsigned.source, Source::Bundled);
+            assert!(unsigned.notice.is_some());
+
+            let stranger = TestKey::new();
+            let forged = run(
+                body.clone(),
+                Some(stranger.sign(&body, "esteban-launcher channel")),
+            )
+            .await;
+            println!("REAL-KEY signed by another key: {forged:?}");
+            assert_eq!(forged.source, Source::Bundled);
+            assert!(forged.notice.unwrap().contains("isn't signed by a key"));
+        }
+
+        #[tokio::test]
         async fn without_a_built_in_key_only_the_compiled_in_list_is_used() {
             let dir = tempfile::tempdir().unwrap();
             let paths = Paths::new(dir.path());
